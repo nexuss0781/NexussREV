@@ -80,6 +80,10 @@ A phase is complete only when its exit gate is satisfied in CI and its artifacts
 
 **Initial baseline blocker (addressed in Phase 0):** the review-time clean configure failed because Capstone was not discoverable and CMake hard-coded LIEF at `/usr/local`. The Phase 0 implementation replaces those assumptions with pinned vcpkg dependencies and CMake package targets; gate completion depends on the verification evidence for this phase.
 
+**Owner-accepted README exception (2026-10-14):** At the project owner's direction, `README.md` remains byte-for-byte identical to its pre-Phase 0 version as the intended product vision. This explicitly waives the README-specific part of Upgrade Area 1 and Gate 0 item 3 for this phase; it does not assert that the current tool already achieves those README outcomes. CLI help, JSON reports, and the scoped status documentation remain accurate about the current partial static-analysis capability, while `benchmarks.md` remains historical/unverified.
+
+**Gate 0 status: COMPLETE WITH ACCEPTED README EXCEPTION.** A clean Linux configure/build and both local CTest targets passed. GitHub Actions run [38458802467](https://github.com/nexuss0781/NexussREV/actions/runs/38458802467) for the README-restoration commit `ec603c6` passed Windows x64 and Linux x64 build/test jobs. The Phase 0 implementation commit `d2dcde9` also passed both jobs in [run 38457664855](https://github.com/nexuss0781/NexussREV/actions/runs/38457664855).
+
 ### Phase 1 — Correct PE ingestion and decode accounting
 
 **Upgrade areas**
