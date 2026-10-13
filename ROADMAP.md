@@ -2,7 +2,7 @@
 
 **Purpose:** Replace the current “zero-loss source recovery” prototype claims with a testable, staged plan for a dependable Windows PE reverse-engineering and decompilation tool.
 
-**Repository baseline inspected:** 2026-10-14. This is a roadmap, not a claim that the gates below have been implemented or passed.
+**Repository baseline inspected:** 2026-10-14. This roadmap defines target gates; completion and verification evidence are recorded with the corresponding phase.
 
 ## 1. Product target and non-negotiable truth
 
@@ -78,7 +78,7 @@ A phase is complete only when its exit gate is satisfied in CI and its artifacts
 - README, CLI help and reports make no exact-source or arbitrary zero-error promise.
 - Every checked-in benchmark has a reproducible command, input identity/hash, tool version, and measured method—or is clearly marked unverified.
 
-**Current blocker:** a clean `cmake -S . -B <build-dir>` was run during this review and fails because `find_library(CAPSTONE_LIB capstone REQUIRED)` cannot find Capstone. CMake also hard-codes LIEF at `/usr/local`; resolve both through the dependency workflow in this phase.
+**Initial baseline blocker (addressed in Phase 0):** the review-time clean configure failed because Capstone was not discoverable and CMake hard-coded LIEF at `/usr/local`. The Phase 0 implementation replaces those assumptions with pinned vcpkg dependencies and CMake package targets; gate completion depends on the verification evidence for this phase.
 
 ### Phase 1 — Correct PE ingestion and decode accounting
 

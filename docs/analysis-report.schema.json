@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexussrev.example/schemas/analysis-report-v1.schema.json",
+  "title": "NexussREV Analysis Report",
+  "description": "Versioned Phase 0 report for static executable parsing and annotated disassembly. A partial report is not a claim of source recovery.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "run",
+    "input",
+    "tool",
+    "dependencies",
+    "stages",
+    "diagnostics",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "status": { "$ref": "#/$defs/stageStatus" },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_status", "end_status", "exit_code"],
+      "properties": {
+        "start_status": { "const": "running" },
+        "end_status": { "$ref": "#/$defs/stageStatus" },
+        "exit_code": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "configuration_version"],
+      "properties": {
+        "name": { "const": "NexussREV" },
+        "version": { "type": "string", "minLength": 1 },
+        "configuration_version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lief", "capstone"],
+      "properties": {
+        "lief": { "type": "string", "minLength": 1 },
+        "capstone": { "type": "string", "minLength": 1 }
+      }
+    },
+    "stages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "status": { "$ref": "#/$defs/stageStatus" }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "severity", "message"],
+        "properties": {
+          "code": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["info", "warning", "error"] },
+          "message": { "type": "string" }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "stageStatus": {
+      "enum": ["complete", "partial", "unsupported", "failed"]
+    }
+  }
+}

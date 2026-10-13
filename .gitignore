@@ -1,0 +1,8 @@
+build/
+build-*/
+.vcpkg/
+vcpkg_installed/
+*.report.json
+*.tmp.*
+__pycache__/
+*.py[cod]

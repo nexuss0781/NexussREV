@@ -1,30 +1,51 @@
 # NexussREV
 
-NexussREV is an advanced binary decompiler and analysis framework designed for high-fidelity code reconstruction and reverse engineering. Leveraging powerful libraries such as Capstone for disassembly and LIEF for binary parsing, NexussREV aims to achieve programmatic zero-loss recovery of executable code, even from stripped binaries.
+NexussREV is an early-stage **static Windows PE analysis and decompilation project**. At Phase 0 it can parse an executable through LIEF and, when sized symbols are present, emit a best-effort Capstone instruction listing. This output is **annotated disassembly**, not reconstructed or original source code, and it is not guaranteed to compile.
 
-## Key Features
+Compilation is lossy and non-invertible in general. NexussREV does not guarantee exact-source recovery, complete function discovery, zero errors, or universal C/C++/Rust support. PE symbols are treated as candidates rather than confirmed functions. Missing symbol sizes are not guessed. The current report is deliberately `partial` because CFG recovery, semantic lifting, type inference, and validated function boundaries are not implemented.
 
-*   **High-Fidelity Decompilation**: Recovers functions, analyzes control flow, and infers data types to generate accurate pseudo-C code.
-*   **Zero-Loss Reconstruction**: Employs an automated patching engine and heuristic estimation to ensure 0% loss in code and symbol recovery, striving for 100% reconstruction across diverse binary types.
-*   **Comprehensive Loss Metrics**: Provides detailed metrics including code coverage, symbol fidelity, data fidelity, and an overall loss ratio to quantify the quality of the decompilation process.
-*   **Extensive Binary Support**: Proven capability to analyze and decompile binaries from various languages and complexities, including C++, C, and Rust.
-*   **IDE Integration**: Designed for compatibility with modern Integrated Development Environments, facilitating seamless integration into reverse engineering workflows.
+## Phase 0 scope
 
-## Project Structure
+- Compatibility invocation: `nexusrev <input.exe> <output>`.
+- Optional flags: `--help`, `--format disassembly`, and `--report-json <path>`.
+- Output: an annotated disassembly text file and a versioned JSON report (`<output>.report.json` by default).
+- Input parsing is static. NexussREV does not launch or execute the input file.
+- Supported build/test targets: Windows x64 and Linux x64. Production PE ingestion and architecture coverage remain gated roadmap work.
 
-*   `include/`: Contains the core header files, including `nexusrev.hpp`, which defines the `Function` and `LossMetrics` structures, and the `Decompiler` class interface.
-*   `src/`: Houses the implementation of the decompiler's functionalities, such as binary loading, analysis, and code emission.
-*   `benchmarks.md`: Documents the performance and accuracy benchmarks, showcasing the tool's effectiveness in achieving zero-loss recovery.
-*   `CMakeLists.txt`: Configuration file for building the project using CMake.
+See [ROADMAP.md](ROADMAP.md) for the staged plan, [docs/status-and-artifact-contract.md](docs/status-and-artifact-contract.md) for result semantics, and [docs/analysis-report.schema.json](docs/analysis-report.schema.json) for the report schema.
 
-## Building and Usage
+## Dependencies and build
 
-Detailed build instructions and usage examples will be provided here.
+LIEF and Capstone versions and the vcpkg registry baseline are pinned in `vcpkg.json`. CMake consumes the exported `LIEF::LIEF` and `capstone::capstone` package targets; there are no `/usr/local` path assumptions or implicit library searches.
 
-## Contribution
+Install a C++17 toolchain, CMake 3.24 or newer, Python 3, Git, and vcpkg. For a reproducible local setup, check out the vcpkg commit recorded by `builtin-baseline` in `vcpkg.json`, bootstrap it, then configure with its toolchain file:
 
-Contributions are highly encouraged! Feel free to fork the repository, implement new features, improve existing ones, and submit pull requests.
+```sh
+VCPKG_BASELINE=$(python3 -c 'import json; print(json.load(open("vcpkg.json"))["builtin-baseline"])')
+git clone --filter=blob:none https://github.com/microsoft/vcpkg.git .vcpkg
+git -C .vcpkg checkout "$VCPKG_BASELINE"
+./.vcpkg/bootstrap-vcpkg.sh -disableMetrics
+cmake -S . -B build \
+  -DCMAKE_TOOLCHAIN_FILE="$PWD/.vcpkg/scripts/buildsystems/vcpkg.cmake" \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
 
-## License
+On Windows, use `bootstrap-vcpkg.bat`, pass `-A x64` to CMake, and use the `.vcpkg\\scripts\\buildsystems\\vcpkg.cmake` toolchain path. The checked-in GitHub Actions workflow builds and tests both Windows x64 and Linux x64; Linux additionally enables AddressSanitizer and UndefinedBehaviorSanitizer.
 
-This project is open-source and available under the [MIT License](LICENSE).
+## CLI
+
+```text
+nexusrev [--format disassembly] [--report-json <path>] <input.exe> <output>
+```
+
+The two-path invocation remains supported. The output is explicitly labelled as instruction disassembly and includes the input SHA-256. The JSON report contains schema/tool/dependency versions, input identity, per-stage status, diagnostics, and artifact paths. A successfully generated but incomplete analysis returns exit code `0` with status `partial`; input, analysis, argument, and output failures return non-zero exit codes and do not print a success banner. See the status-contract document for the exit-code and diagnostic taxonomy.
+
+## Tests and fixtures
+
+The test suite includes SHA-256 known-answer checks and CLI acceptance tests for help, missing and malformed inputs, report contents, and output-write failure. `tests/fixtures/minimal-pe-x64.exe` is a deterministic synthetic fixture generated by `tests/make_minimal_pe.py`; it exists only for parser/report testing and is not a real-world benchmark.
+
+## Benchmarks
+
+The former benchmark table has been withdrawn from performance claims. It did not include reproducible input identities, hashes, tool versions, or measurement methods. See [benchmarks.md](benchmarks.md), which preserves that result's status as historical and unverified. No current accuracy or performance score is asserted.

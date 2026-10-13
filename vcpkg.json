@@ -1,0 +1,28 @@
+{
+  "name": "nexussrev",
+  "version-string": "0.1.0",
+  "builtin-baseline": "e456309491fd875487bf02b8a0dca76c1b1b00cc",
+  "dependencies": [
+    {
+      "name": "capstone",
+      "version>=" : "5.0.9",
+      "features": ["x86"]
+    },
+    {
+      "name": "lief",
+      "version>=" : "0.17.6",
+      "default-features": false
+    }
+  ],
+  "overrides": [
+    {
+      "name": "capstone",
+      "version": "5.0.9"
+    },
+    {
+      "name": "lief",
+      "version-semver": "0.17.6",
+      "port-version": 1
+    }
+  ]
+}
