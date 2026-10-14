@@ -104,8 +104,14 @@ jobs:
       - name: Resolve MSVC compiler and linker
         shell: pwsh
         run: |
-          $compiler = (Get-Command cl.exe).Source
-          $linker = Join-Path (Split-Path $compiler) "link.exe"
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe unavailable" }
+          $installPath = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installPath) { throw "Visual Studio C++ x64 toolset unavailable" }
+          $compilerItem = Get-ChildItem -Path (Join-Path $installPath "VC\Tools\MSVC\*\bin\Hostx64\x64\cl.exe") | Sort-Object FullName | Select-Object -Last 1
+          if (-not $compilerItem) { throw "MSVC x64 compiler not found" }
+          $compiler = $compilerItem.FullName
+          $linker = Join-Path $compilerItem.DirectoryName "link.exe"
           if (-not (Test-Path $linker)) { throw "MSVC linker not found beside cl.exe" }
           "MSVC_COMPILER=$compiler" >> $env:GITHUB_ENV
           "MSVC_LINKER=$linker" >> $env:GITHUB_ENV
