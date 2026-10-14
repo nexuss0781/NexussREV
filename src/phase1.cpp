@@ -2,6 +2,8 @@
 
 #include <LIEF/LIEF.hpp>
 #include <algorithm>
+#include <chrono>
+#include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -33,9 +35,27 @@ constexpr std::uint64_t kMaxOutputBytes = 64ULL * 1024ULL * 1024ULL;
 constexpr std::size_t kMaxInstructions = 20000U;
 constexpr std::size_t kMaxDecodeGaps = 20000U;
 constexpr std::size_t kMaxDecodeGapRecords = kMaxDecodeGaps - kMaxSections;
+volatile std::sig_atomic_t g_cancel_requested = 0;
+std::chrono::steady_clock::time_point g_analysis_deadline{};
+bool g_deadline_enabled = false;
+
+StopReason current_stop_reason() noexcept {
+    if (g_cancel_requested != 0) return StopReason::cancelled;
+    if (g_deadline_enabled && std::chrono::steady_clock::now() >= g_analysis_deadline)
+        return StopReason::timed_out;
+    return StopReason::none;
+}
 
 void diagnostic(AnalysisReport& report, std::string code, std::string severity, std::string message) {
     report.diagnostics.push_back({std::move(code), std::move(severity), std::move(message)});
+}
+
+void add_stop_diagnostic(AnalysisReport& report, StopReason reason) {
+    const bool timed_out = reason == StopReason::timed_out;
+    diagnostic(report, timed_out ? "ANALYSIS_TIMEOUT" : "ANALYSIS_CANCELLED", "error",
+               timed_out ? "analysis exceeded its cooperative wall-clock deadline" :
+                           "analysis was cancelled by the caller");
+    report.status = "failed";
 }
 
 std::string escape_json(const std::string& value) {
@@ -321,6 +341,12 @@ void decode_sections(AnalysisReport& report, csh handle) {
         }
         std::size_t pos = 0;
         while (pos < code.size()) {
+            const auto reason = current_stop_reason();
+            if (reason != StopReason::none) {
+                add_stop_diagnostic(report, reason);
+                report.stages.push_back({"analysis", "failed"});
+                return;
+            }
             if (report.instructions.size() >= kMaxInstructions || report.decode_gaps.size() >= kMaxDecodeGapRecords) {
                 add_limit_gap(report, si, pos, sec.file_backed_size - pos);
                 stop_for_record_limit = true;
@@ -616,6 +642,22 @@ std::string make_json(const AnalysisReport& r) {
 
 } // namespace
 
+void request_cancellation() noexcept { g_cancel_requested = 1; }
+
+void set_analysis_timeout_ms(std::uint64_t timeout_ms) noexcept {
+    if (timeout_ms == 0U) {
+        g_deadline_enabled = false;
+        return;
+    }
+    constexpr std::uint64_t kMaxTimeoutMs = 3600000U;
+    const auto bounded_ms = std::min(timeout_ms, kMaxTimeoutMs);
+    g_analysis_deadline = std::chrono::steady_clock::now() +
+        std::chrono::milliseconds(static_cast<std::chrono::milliseconds::rep>(bounded_ms));
+    g_deadline_enabled = true;
+}
+
+StopReason analysis_stop_reason() noexcept { return current_stop_reason(); }
+
 Decompiler::Decompiler() = default;
 Decompiler::~Decompiler() { if (capstone_handle_ != 0) cs_close(&capstone_handle_); }
 
@@ -627,6 +669,10 @@ bool Decompiler::load_binary(const std::string& path, AnalysisReport& report) {
     report.stages.push_back({"parse", "failed"});
     std::vector<std::uint8_t> bytes;
     std::string code, message;
+    if (current_stop_reason() != StopReason::none) {
+        add_stop_diagnostic(report, current_stop_reason());
+        return false;
+    }
     if (!read_input(path, bytes, code, message)) { diagnostic(report, code, "error", message); return false; }
     report.input_sha256 = sha256(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
     if (!PeImage::parse(std::move(bytes), image_, code, message)) { diagnostic(report, code, "error", message); return false; }
@@ -643,6 +689,10 @@ bool Decompiler::load_binary(const std::string& path, AnalysisReport& report) {
             diagnostic(report, "LIEF_CROSSCHECK_UNAVAILABLE", "warning", "validated PE adapter succeeded; LIEF cross-check failed");
         }
     }
+    if (current_stop_reason() != StopReason::none) {
+        add_stop_diagnostic(report, current_stop_reason());
+        return false;
+    }
     report.stages.back().status = "complete";
     return true;
 }
@@ -651,6 +701,11 @@ bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path) {
     if (!image_.file_bytes) {
         diagnostic(report, "ANALYSIS_WITHOUT_INPUT", "error", "analysis requires a validated PE image");
         report.stages.push_back({"analysis", "failed"}); report.status = "failed"; return false;
+    }
+    if (current_stop_reason() != StopReason::none) {
+        add_stop_diagnostic(report, current_stop_reason());
+        report.stages.push_back({"analysis", "failed"});
+        return false;
     }
     if (!image_.supported_x64_native) {
         report.stages.push_back({"analysis", "unsupported"}); report.status = "unsupported";
@@ -681,6 +736,10 @@ bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path) {
         analyze_semantics(report);
         analyze_phase4(report);
     }
+    if (current_stop_reason() != StopReason::none) {
+        add_stop_diagnostic(report, current_stop_reason());
+        return false;
+    }
     return report.status != "failed";
 }
 
@@ -702,6 +761,8 @@ std::string Decompiler::emit_annotated_disassembly(const AnalysisReport& r) cons
     }
     o << "Status: " << r.status << "\nNOTICE: Static PE metadata and best-effort instruction decoding only; this is not original source code,\n"
       << "not guaranteed compilable C/C++, and not a claim of complete function recovery.\nRVA, VA, and file offset are distinct.\n\nSections:\n";
+    if (r.status == "unsupported")
+        o << "UNSUPPORTED: this input is outside the native PE32+ x86-64 analysis surface; no x64 instruction decoding was performed.\n";
     for (const auto& s : r.pe.sections) o << "  " << s.name << " RVA=0x" << std::hex << s.virtual_address << " FILE=0x" << s.raw_offset << std::dec
       << " raw=" << s.raw_size << " file-backed=" << s.file_backed_size << " zero-fill=" << s.zero_fill_size << " executable=" << (s.executable?"yes":"no") << "\n";
     o << "\nMetadata: imports=" << r.pe.imports.size() << " exports=" << r.pe.exports.size() << " relocations=" << r.pe.relocations.size()

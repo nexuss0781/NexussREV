@@ -4,6 +4,7 @@
 #include <capstone/capstone.h>
 #include <array>
 #include <cstdint>
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
@@ -14,6 +15,12 @@ class Binary;
 }
 
 namespace nexusrev {
+
+enum class StopReason { none, cancelled, timed_out };
+
+void request_cancellation() noexcept;
+void set_analysis_timeout_ms(std::uint64_t timeout_ms) noexcept;
+StopReason analysis_stop_reason() noexcept;
 
 struct Diagnostic {
     std::string code;
@@ -378,7 +385,7 @@ struct Phase4AnalysisRecord {
 };
 
 struct AnalysisReport {
-    int schema_version = 5;
+    int schema_version = 6;
     std::string status = "failed";
     std::string start_status = "running";
     int exit_code = 0;

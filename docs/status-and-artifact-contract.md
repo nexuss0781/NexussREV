@@ -1,6 +1,6 @@
-# Phase 4 status and artifact contract
+# Status and artifact contract
 
-This contract is implemented by the Phase 1–4 CLI and the JSON Schema in [`analysis-report.schema.json`](analysis-report.schema.json). The report schema is versioned independently of the executable.
+This contract is implemented by the CLI and the active schema-v6 JSON Schema in [`analysis-report.schema.json`](analysis-report.schema.json). The prior v5 schema remains available at [`analysis-report-v5.schema.json`](analysis-report-v5.schema.json); report schema is versioned independently of the executable and analyzer configuration.
 
 ## Supported input and output
 
@@ -9,14 +9,14 @@ NexussREV performs bounded static parsing of PE32/PE32+ headers and metadata. Ph
 For `nexusrev <input> <output>`:
 
 - `<output>` is UTF-8 annotated x86-64 disassembly with RVA, VA, file-offset, and byte information. It is not C/C++ source and is not guaranteed compilable.
-- `<output>.report.json` is the schema-v5 machine-readable report; override the path with `--report-json <path>`.
+- `<output>.report.json` is the schema-v6 machine-readable report; override the path with `--report-json <path>`.
 - `--format pseudocode` selects the best-effort C-like pseudocode emitter. It is explicitly labelled as incomplete, not original source, and not guaranteed compilable. The default remains annotated disassembly.
 - `--pdb <path>` selects an optional PDB. Without it, the CLI checks the PE's recorded CodeView path and same-directory filename. No remote symbol-server request is made.
 - `--reference-report <ghidra.tsv>` optionally compares function starts and control-flow facts against the versioned TSV emitted by `tools/ghidra/ExportNexussREVReference.py`.
 
 The report includes the input path, byte count and SHA-256, parsed PE identity and section layout, declared data directories, bounded import/export/relocation/debug/TLS/unwind/CLR metadata, per-instruction and decode-gap addresses/bytes, coverage totals, PDB identity and symbol-provider status, function evidence and unresolved ranges/control-flow, Phase 3 semantic instruction records, Phase 4 stack frames/signatures/import prototypes/call-argument flows/control-structure candidates, CFG blocks/typed edges, call-graph facts, optional reference differences, stages, diagnostics, dependency versions, and artifact paths. The security directory is represented as a file-offset-addressed directory, not an RVA.
 
-Parsing is bounded to a 256 MiB input, 96 sections, 32 data directories, and bounded metadata/output record counts. PDB parsing is bounded to the same input ceiling, caps stream and procedure counts, validates MSF 7.0 block/stream ranges, and trusts records only after the PE CodeView GUID and age match. Header and section ranges are validated with overflow-safe arithmetic. RVA-to-file-offset conversion rejects virtual zero-fill and out-of-range reads. LIEF is used as a secondary parse over the same in-memory byte snapshot; the validated PE adapter is the source for emitted metadata and instruction bytes.
+Parsing is bounded to a 256 MiB input, 96 sections, 32 data directories, and bounded metadata/output record counts. Executable decode work is capped at 64 MiB; instruction and decode-gap records at 20,000 each; and each artifact at 64 MiB. Optional `--timeout-ms` and `--memory-limit-mib` controls provide cooperative deadline checks and a platform process-memory/address-space cap. PDB parsing is bounded to the same input ceiling, caps stream and procedure counts, validates MSF 7.0 block/stream ranges, and trusts records only after the PE CodeView GUID and age match. Header and section ranges are validated with overflow-safe arithmetic. RVA-to-file-offset conversion rejects virtual zero-fill and out-of-range reads. LIEF is used as a secondary parse over the same in-memory byte snapshot; the validated PE adapter is the source for emitted metadata and instruction bytes.
 
 ## Statuses and byte accounting
 
@@ -74,11 +74,13 @@ For executable file-backed bytes, the report distinguishes processed, decoded, u
 | `5` | Analysis could not run. |
 | `6` | Artifact write/publication failed. |
 | `70` | Unexpected internal failure. |
+| `124` | Cooperative analysis deadline expired. |
+| `130` | Analysis was cancelled by Ctrl-C/Ctrl-Break or a termination signal. |
 
-A successfully published report records exit code `0`. Expected input/analysis/write failures do not emit the success banner or a report artifact. Output files are staged before publication.
+A successfully published report records exit code `0`. Expected input/analysis/write failures do not emit the success banner or a report artifact. Exit code `124` denotes a cooperative timeout; `130` denotes cancellation. `--log-format jsonl` emits stderr diagnostics as JSON Lines with `level`, `code`, and `message`. Each artifact is staged, flushed and atomically replaced individually; the output/report pair is not a single cross-file transaction. See [`phase6-validation.md`](phase6-validation.md) for release-boundary details.
 
 ## Important diagnostic families
 
-Diagnostics use `code`, `severity` (`info`, `warning`, or `error`), and a human-readable `message`. Codes cover input/header/section/directory bounds, section overlap, PE address overflow, optional metadata truncation, decoder gaps/limits, PDB identity/missing/parse states, unsupported architectures or CLR, output errors, invalid arguments, and internal failures. Metadata warnings do not turn an otherwise safe image parse into an unsafe read; unreadable or malformed records are reported and omitted as appropriate.
+Diagnostics use `code`, `severity` (`info`, `warning`, or `error`), and a human-readable `message`. Codes cover input/header/section/directory bounds, section overlap, PE address overflow, optional metadata truncation, decoder gaps/limits, PDB identity/missing/parse states, unsupported architectures or CLR, output errors, invalid arguments, resource-limit setup and internal failures. Metadata warnings do not turn an otherwise safe image parse into an unsafe read; unreadable or malformed records are reported and omitted as appropriate.
 
 Exact file identity and universal correctness are never implied by a status value. The report's SHA-256 identifies the bytes analyzed by the adapter; no sample binary is executed during parsing or tests.

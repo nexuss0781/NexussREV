@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://nexussrev.example/schemas/analysis-report-v5.schema.json",
+  "$id": "https://nexussrev.example/schemas/analysis-report-v6.schema.json",
   "title": "NexussREV Analysis Report",
-  "description": "Version 5 report for bounded PE decoding, evidence-labelled function boundaries, conservative x86-64 semantics, CFG/call-graph analysis, and Phase 4 ABI/dataflow recovery. Results do not claim original-source recovery.",
+  "description": "Version 6 report for bounded PE decoding, evidence-labelled function boundaries, conservative x86-64 semantics, CFG/call-graph analysis, and Phase 4 ABI/dataflow recovery. Results do not claim original-source recovery.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "status", "run", "input", "tool", "dependencies", "pe", "decode", "symbols", "function_recovery", "semantic_analysis", "dataflow_analysis", "stages", "diagnostics", "artifacts"],
   "properties": {
-    "schema_version": { "const": 5 },
+    "schema_version": { "const": 6 },
     "status": { "$ref": "#/$defs/stageStatus" },
     "run": {
       "type": "object", "additionalProperties": false,

@@ -1,0 +1,578 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexussrev.example/schemas/analysis-report-v5.schema.json",
+  "title": "NexussREV Analysis Report",
+  "description": "Version 5 report for bounded PE decoding, evidence-labelled function boundaries, conservative x86-64 semantics, CFG/call-graph analysis, and Phase 4 ABI/dataflow recovery. Results do not claim original-source recovery.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "run", "input", "tool", "dependencies", "pe", "decode", "symbols", "function_recovery", "semantic_analysis", "dataflow_analysis", "stages", "diagnostics", "artifacts"],
+  "properties": {
+    "schema_version": { "const": 5 },
+    "status": { "$ref": "#/$defs/stageStatus" },
+    "run": {
+      "type": "object", "additionalProperties": false,
+      "required": ["start_status", "end_status", "exit_code"],
+      "properties": {
+        "start_status": { "const": "running" },
+        "end_status": { "$ref": "#/$defs/stageStatus" },
+        "exit_code": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "input": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "size_bytes"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "size_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "tool": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "version", "configuration_version"],
+      "properties": {
+        "name": { "const": "NexussREV" },
+        "version": { "type": "string", "minLength": 1 },
+        "configuration_version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "dependencies": {
+      "type": "object", "additionalProperties": false,
+      "required": ["lief", "capstone"],
+      "properties": {
+        "lief": { "type": "string", "minLength": 1 },
+        "capstone": { "type": "string", "minLength": 1 }
+      }
+    },
+    "pe": {
+      "type": "object", "additionalProperties": false,
+      "required": ["machine", "machine_name", "optional_header_magic", "pe32_plus", "supported_x64_native", "is_dll", "image_base", "entry_point", "section_alignment", "file_alignment", "size_of_image", "size_of_headers", "declared_directory_count", "sections", "data_directories", "imports", "exports", "base_relocations", "debug_entries", "tls", "runtime_functions", "clr", "diagnostics"],
+      "properties": {
+        "machine": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "machine_name": { "type": "string" },
+        "optional_header_magic": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "pe32_plus": { "type": "boolean" },
+        "supported_x64_native": { "type": "boolean" },
+        "is_dll": { "type": "boolean" },
+        "image_base": { "type": "integer", "minimum": 0 },
+        "entry_point": {
+          "type": "object", "additionalProperties": false,
+          "required": ["rva", "va", "file_offset"],
+          "properties": {
+            "rva": { "type": "integer", "minimum": 0 },
+            "va": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+            "file_offset": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] }
+          }
+        },
+        "section_alignment": { "type": "integer", "minimum": 0 },
+        "file_alignment": { "type": "integer", "minimum": 0 },
+        "size_of_image": { "type": "integer", "minimum": 0 },
+        "size_of_headers": { "type": "integer", "minimum": 0 },
+        "declared_directory_count": { "type": "integer", "minimum": 0, "maximum": 32 },
+        "sections": { "type": "array", "items": { "$ref": "#/$defs/section" } },
+        "data_directories": { "type": "array", "items": { "$ref": "#/$defs/dataDirectory" } },
+        "imports": { "type": "array", "items": { "$ref": "#/$defs/import" } },
+        "exports": { "type": "array", "items": { "$ref": "#/$defs/export" } },
+        "base_relocations": { "type": "array", "items": { "$ref": "#/$defs/relocation" } },
+        "debug_entries": { "type": "array", "items": { "$ref": "#/$defs/debugEntry" } },
+        "tls": { "$ref": "#/$defs/tls" },
+        "runtime_functions": { "type": "array", "items": { "$ref": "#/$defs/runtimeFunction" } },
+        "clr": { "$ref": "#/$defs/clr" },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+      }
+    },
+    "decode": {
+      "type": "object", "additionalProperties": false,
+      "required": ["executable_file_backed_bytes", "processed_bytes", "decoded_bytes", "undecoded_bytes", "executable_zero_fill_bytes", "limited_bytes", "instruction_count", "instructions", "gaps"],
+      "properties": {
+        "executable_file_backed_bytes": { "type": "integer", "minimum": 0 },
+        "processed_bytes": { "type": "integer", "minimum": 0 },
+        "decoded_bytes": { "type": "integer", "minimum": 0 },
+        "undecoded_bytes": { "type": "integer", "minimum": 0 },
+        "executable_zero_fill_bytes": { "type": "integer", "minimum": 0 },
+        "limited_bytes": { "type": "integer", "minimum": 0 },
+        "instruction_count": { "type": "integer", "minimum": 0 },
+        "instructions": { "type": "array", "items": { "$ref": "#/$defs/instruction" } },
+        "gaps": { "type": "array", "items": { "$ref": "#/$defs/gap" } }
+      }
+    },
+    "symbols": { "$ref": "#/$defs/symbols" },
+    "function_recovery": { "$ref": "#/$defs/functionRecovery" },
+    "semantic_analysis": { "$ref": "#/$defs/semanticAnalysis" },
+    "dataflow_analysis": { "$ref": "#/$defs/dataflowAnalysis" },
+    "stages": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "status"],
+        "properties": { "name": { "type": "string", "minLength": 1 }, "status": { "$ref": "#/$defs/stageStatus" } }
+      }
+    },
+    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
+    "artifacts": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  },
+  "$defs": {
+    "stageStatus": { "enum": ["complete", "partial", "unsupported", "failed"] },
+    "symbols": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "requested_path", "resolved_path", "expected_identity", "observed_identity", "functions", "diagnostics"],
+      "properties": {
+        "status": { "enum": ["not_present", "unverifiable", "missing", "matched", "mismatched", "invalid"] },
+        "requested_path": { "type": "string" }, "resolved_path": { "type": "string" },
+        "expected_identity": { "$ref": "#/$defs/pdbIdentity" }, "observed_identity": { "$ref": "#/$defs/pdbIdentity" },
+        "functions": { "type": "array", "items": { "$ref": "#/$defs/pdbFunction" } },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+      }
+    },
+    "pdbIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["guid", "age"],
+      "properties": { "guid": { "type": "string", "pattern": "^([a-f0-9]{32})?$" }, "age": { "type": "integer", "minimum": 0 } }
+    },
+    "pdbFunction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "start_rva", "end_rva", "type_index", "type_status", "return_type", "parameter_types", "type_provenance", "provenance", "confidence"],
+      "properties": {
+        "name": { "type": "string" }, "start_rva": { "type": "integer", "minimum": 0 },
+        "end_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "type_index": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "type_status": { "enum": ["unknown", "partial", "decoded"] }, "return_type": { "type": "string" },
+        "parameter_types": { "type": "array", "items": { "type": "string" } }, "type_provenance": { "type": "string" },
+        "provenance": { "type": "string", "minLength": 1 }, "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "functionRecovery": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "known_functions", "candidate_functions", "fragments", "unresolved_ranges", "unresolved_control_flow", "metrics"],
+      "properties": {
+        "status": { "$ref": "#/$defs/stageStatus" },
+        "known_functions": { "type": "array", "items": { "$ref": "#/$defs/functionRecord" } },
+        "candidate_functions": { "type": "array", "items": { "$ref": "#/$defs/functionRecord" } },
+        "fragments": { "type": "array", "items": { "$ref": "#/$defs/functionRecord" } },
+        "unresolved_ranges": { "type": "array", "items": { "$ref": "#/$defs/unresolvedRange" } },
+        "unresolved_control_flow": { "type": "array", "items": { "$ref": "#/$defs/unresolvedFlow" } },
+        "metrics": { "$ref": "#/$defs/recoveryMetrics" }
+      }
+    },
+    "functionRecord": {
+      "type": "object", "additionalProperties": false,
+      "required": ["entity_kind", "boundary_status", "start_rva", "end_rva", "file_offset", "label", "aliases", "confidence", "ambiguous", "evidence"],
+      "properties": {
+        "entity_kind": { "enum": ["known_function", "candidate_function", "fragment"] },
+        "boundary_status": { "enum": ["unknown", "pdb_bounded", "evidence_bounded", "ambiguous"] },
+        "start_rva": { "type": "integer", "minimum": 0 },
+        "end_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "file_offset": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "label": { "type": "string" }, "aliases": { "type": "array", "items": { "type": "string" } },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }, "ambiguous": { "type": "boolean" },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/functionEvidence" } }
+      }
+    },
+    "functionEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "description", "confidence", "reference_rva", "start_rva", "end_rva"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 }, "description": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "reference_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "start_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "end_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] }
+      }
+    },
+    "unresolvedRange": {
+      "type": "object", "additionalProperties": false,
+      "required": ["section_index", "start_rva", "end_rva", "reason"],
+      "properties": {
+        "section_index": { "type": "integer", "minimum": 0 }, "start_rva": { "type": "integer", "minimum": 0 },
+        "end_rva": { "type": "integer", "minimum": 0 }, "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "unresolvedFlow": {
+      "type": "object", "additionalProperties": false,
+      "required": ["from_rva", "target_rva", "flow_kind", "reason"],
+      "properties": {
+        "from_rva": { "type": "integer", "minimum": 0 },
+        "target_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "flow_kind": { "type": "string", "minLength": 1 }, "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "recoveryMetrics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["known_function_count", "candidate_function_count", "fragment_count", "bounded_range_count", "ambiguous_range_count", "unresolved_range_count"],
+      "properties": {
+        "known_function_count": { "type": "integer", "minimum": 0 }, "candidate_function_count": { "type": "integer", "minimum": 0 },
+        "fragment_count": { "type": "integer", "minimum": 0 }, "bounded_range_count": { "type": "integer", "minimum": 0 },
+        "ambiguous_range_count": { "type": "integer", "minimum": 0 }, "unresolved_range_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "diagnostic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "severity", "message"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["info", "warning", "error"] },
+        "message": { "type": "string" }
+      }
+    },
+    "section": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "rva", "virtual_size", "mapped_size", "file_offset", "raw_size", "file_backed_size", "zero_fill_size", "characteristics", "executable"],
+      "properties": {
+        "name": { "type": "string" }, "rva": { "type": "integer", "minimum": 0 },
+        "virtual_size": { "type": "integer", "minimum": 0 }, "mapped_size": { "type": "integer", "minimum": 0 },
+        "file_offset": { "type": "integer", "minimum": 0 }, "raw_size": { "type": "integer", "minimum": 0 },
+        "file_backed_size": { "type": "integer", "minimum": 0 }, "zero_fill_size": { "type": "integer", "minimum": 0 },
+        "characteristics": { "type": "integer", "minimum": 0 }, "executable": { "type": "boolean" }
+      }
+    },
+    "dataDirectory": {
+      "type": "object", "additionalProperties": false,
+      "required": ["index", "name", "rva_or_file_offset", "size", "address_kind"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 }, "name": { "type": "string" },
+        "rva_or_file_offset": { "type": "integer", "minimum": 0 }, "size": { "type": "integer", "minimum": 0 },
+        "address_kind": { "enum": ["rva", "file_offset"] }
+      }
+    },
+    "import": {
+      "type": "object", "additionalProperties": false,
+      "required": ["library", "name", "by_ordinal", "ordinal", "iat_rva"],
+      "properties": {
+        "library": { "type": "string" }, "name": { "type": "string" }, "by_ordinal": { "type": "boolean" },
+        "ordinal": { "type": "integer", "minimum": 0 }, "iat_rva": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "export": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "ordinal", "rva", "forwarded_to"],
+      "properties": { "name": { "type": "string" }, "ordinal": { "type": "integer", "minimum": 0 }, "rva": { "type": "integer", "minimum": 0 }, "forwarded_to": { "type": "string" } }
+    },
+    "relocation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["rva", "type"], "properties": { "rva": { "type": "integer", "minimum": 0 }, "type": { "type": "integer", "minimum": 0, "maximum": 15 } }
+    },
+    "debugEntry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "data_size", "data_rva", "data_file_offset", "codeview_guid", "codeview_age", "pdb_path"],
+      "properties": {
+        "type": { "type": "integer", "minimum": 0 }, "data_size": { "type": "integer", "minimum": 0 },
+        "data_rva": { "type": "integer", "minimum": 0 }, "data_file_offset": { "type": "integer", "minimum": 0 },
+        "codeview_guid": { "type": "string" }, "codeview_age": { "type": "integer", "minimum": 0 }, "pdb_path": { "type": "string" }
+      }
+    },
+    "tls": {
+      "type": "object", "additionalProperties": false,
+      "required": ["present", "raw_data_start_va", "raw_data_end_va", "index_va", "callbacks_va", "zero_fill_size", "characteristics", "callbacks"],
+      "properties": {
+        "present": { "type": "boolean" }, "raw_data_start_va": { "type": "integer", "minimum": 0 },
+        "raw_data_end_va": { "type": "integer", "minimum": 0 }, "index_va": { "type": "integer", "minimum": 0 },
+        "callbacks_va": { "type": "integer", "minimum": 0 }, "zero_fill_size": { "type": "integer", "minimum": 0 },
+        "characteristics": { "type": "integer", "minimum": 0 }, "callbacks": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
+      }
+    },
+    "runtimeFunction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["begin_rva", "end_rva", "unwind_rva", "unwind_info_available", "unwind_version", "unwind_flags", "prolog_size", "unwind_code_count", "frame_register", "frame_offset"],
+      "properties": {
+        "begin_rva": { "type": "integer", "minimum": 0 }, "end_rva": { "type": "integer", "minimum": 0 },
+        "unwind_rva": { "type": "integer", "minimum": 0 }, "unwind_info_available": { "type": "boolean" },
+        "unwind_version": { "type": "integer", "minimum": 0 }, "unwind_flags": { "type": "integer", "minimum": 0 },
+        "prolog_size": { "type": "integer", "minimum": 0 }, "unwind_code_count": { "type": "integer", "minimum": 0 },
+        "frame_register": { "type": "integer", "minimum": 0 }, "frame_offset": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "clr": {
+      "type": "object", "additionalProperties": false,
+      "required": ["present", "header_size", "metadata_rva", "metadata_size", "flags", "entry_point", "il_only"],
+      "properties": {
+        "present": { "type": "boolean" }, "header_size": { "type": "integer", "minimum": 0 },
+        "metadata_rva": { "type": "integer", "minimum": 0 }, "metadata_size": { "type": "integer", "minimum": 0 },
+        "flags": { "type": "integer", "minimum": 0 }, "entry_point": { "type": "integer", "minimum": 0 }, "il_only": { "type": "boolean" }
+      }
+    },
+    "instruction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["section_index", "va", "rva", "file_offset", "bytes", "mnemonic", "operands", "detail"],
+      "properties": {
+        "section_index": { "type": "integer", "minimum": 0 }, "va": { "type": "integer", "minimum": 0 },
+        "rva": { "type": "integer", "minimum": 0 }, "file_offset": { "type": "integer", "minimum": 0 },
+        "bytes": { "type": "string" }, "mnemonic": { "type": "string" }, "operands": { "type": "string" },
+        "detail": { "$ref": "#/$defs/instructionDetail" }
+      }
+    },
+    "instructionDetail": {
+      "type": "object", "additionalProperties": false,
+      "required": ["available", "instruction_id", "instruction_name", "groups", "registers_read", "registers_written", "prefixes", "opcodes", "rex", "address_size", "modrm", "sib", "displacement", "flags", "encoding", "operands"],
+      "properties": {
+        "available": { "type": "boolean" }, "instruction_id": { "type": "integer", "minimum": 0 },
+        "instruction_name": { "type": "string" }, "groups": { "type": "array", "items": { "type": "string" } },
+        "registers_read": { "type": "array", "items": { "type": "string" } },
+        "registers_written": { "type": "array", "items": { "type": "string" } },
+        "prefixes": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "integer", "minimum": 0, "maximum": 255 } },
+        "opcodes": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "integer", "minimum": 0, "maximum": 255 } },
+        "rex": { "type": "integer", "minimum": 0, "maximum": 255 }, "address_size": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "modrm": { "type": "integer", "minimum": 0, "maximum": 255 }, "sib": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "displacement": { "type": "integer" }, "flags": { "type": "integer", "minimum": 0 },
+        "encoding": { "$ref": "#/$defs/x86Encoding" },
+        "operands": { "type": "array", "items": { "$ref": "#/$defs/x86Operand" } }
+      }
+    },
+    "x86Encoding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["modrm_offset", "displacement_offset", "displacement_size", "immediate_offset", "immediate_size"],
+      "properties": {
+        "modrm_offset": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "displacement_offset": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "displacement_size": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "immediate_offset": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "immediate_size": { "type": "integer", "minimum": 0, "maximum": 255 }
+      }
+    },
+    "x86Operand": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "size", "access", "register", "immediate", "segment", "base", "index", "scale", "displacement", "avx_broadcast", "avx_zero_opmask"],
+      "properties": {
+        "type": { "enum": ["register", "immediate", "memory", "invalid"] },
+        "size": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "access": { "type": "integer", "minimum": 0, "maximum": 255 }, "register": { "type": "string" },
+        "immediate": { "type": "integer" }, "segment": { "type": "string" }, "base": { "type": "string" },
+        "index": { "type": "string" }, "scale": { "type": "integer" }, "displacement": { "type": "integer" },
+        "avx_broadcast": { "type": "integer", "minimum": 0, "maximum": 255 }, "avx_zero_opmask": { "type": "boolean" }
+      }
+    },
+    "phase4Evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "description", "confidence"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 }, "description": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "dataflowAnalysis": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "backend", "abi", "stack_frames", "signatures", "call_argument_flows", "imported_calls", "control_structures", "rtti_vtables", "limitations"],
+      "properties": {
+        "status": { "$ref": "#/$defs/stageStatus" }, "backend": { "type": "string" }, "abi": { "type": "string" },
+        "stack_frames": { "type": "array", "items": { "$ref": "#/$defs/stackFrame" } },
+        "signatures": { "type": "array", "items": { "$ref": "#/$defs/functionSignature" } },
+        "call_argument_flows": { "type": "array", "items": { "$ref": "#/$defs/callArgumentFlow" } },
+        "imported_calls": { "type": "array", "items": { "$ref": "#/$defs/importedCall" } },
+        "control_structures": { "type": "array", "items": { "$ref": "#/$defs/controlStructure" } },
+        "rtti_vtables": { "type": "array", "items": { "$ref": "#/$defs/rttiVtable" } },
+        "limitations": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "stackFrame": {
+      "type": "object", "additionalProperties": false,
+      "required": ["function_start_rva", "status", "has_frame_pointer", "frame_pointer_register", "max_stack_depth_bytes_below_entry_rsp", "variables", "issues"],
+      "properties": {
+        "function_start_rva": { "type": "integer", "minimum": 0 }, "status": { "$ref": "#/$defs/stageStatus" },
+        "has_frame_pointer": { "type": "boolean" }, "frame_pointer_register": { "type": "string" },
+        "max_stack_depth_bytes_below_entry_rsp": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "variables": { "type": "array", "items": { "$ref": "#/$defs/recoveredVariable" } },
+        "issues": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "recoveredVariable": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "storage", "stack_offset", "register", "size", "type", "confidence", "read_count", "write_count", "evidence"],
+      "properties": {
+        "name": { "type": "string" }, "storage": { "enum": ["stack_slot", "register", "unknown"] },
+        "stack_offset": { "oneOf": [{ "type": "integer" }, { "type": "null" }] }, "register": { "type": "string" },
+        "size": { "type": "integer", "minimum": 0, "maximum": 255 }, "type": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "read_count": { "type": "integer", "minimum": 0 }, "write_count": { "type": "integer", "minimum": 0 },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } }
+      }
+    },
+    "functionSignature": {
+      "type": "object", "additionalProperties": false,
+      "required": ["function_start_rva", "label", "status", "calling_convention", "return_type", "return_type_status", "confidence", "evidence", "parameters"],
+      "properties": {
+        "function_start_rva": { "type": "integer", "minimum": 0 }, "label": { "type": "string" },
+        "status": { "$ref": "#/$defs/stageStatus" }, "calling_convention": { "type": "string" },
+        "return_type": { "type": "string" }, "return_type_status": { "enum": ["unknown", "observed", "inferred", "catalogued"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } },
+        "parameters": { "type": "array", "items": { "$ref": "#/$defs/abiParameter" } }
+      }
+    },
+    "abiParameter": {
+      "type": "object", "additionalProperties": false,
+      "required": ["index", "location", "register", "stack_offset", "type", "type_status", "confidence", "evidence"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 }, "location": { "enum": ["register", "stack", "unknown"] },
+        "register": { "type": "string" }, "stack_offset": { "oneOf": [{ "type": "integer" }, { "type": "null" }] },
+        "type": { "type": "string" }, "type_status": { "enum": ["unknown", "observed", "inferred", "catalogued"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } }
+      }
+    },
+    "callArgumentFlow": {
+      "type": "object", "additionalProperties": false,
+      "required": ["caller_start_rva", "call_rva", "target_rva", "callee", "parameter_index", "argument_register", "source_kind", "source_description", "source_rva", "argument_type", "type_status", "type_confidence", "confidence", "evidence"],
+      "properties": {
+        "caller_start_rva": { "type": "integer", "minimum": 0 }, "call_rva": { "type": "integer", "minimum": 0 },
+        "target_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "callee": { "type": "string" }, "parameter_index": { "type": "integer", "minimum": 0 },
+        "argument_register": { "type": "string" }, "source_kind": { "type": "string" }, "source_description": { "type": "string" },
+        "source_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "argument_type": { "type": "string" }, "type_status": { "enum": ["unknown", "observed", "inferred", "catalogued"] },
+        "type_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } }
+      }
+    },
+    "importedCall": {
+      "type": "object", "additionalProperties": false,
+      "required": ["caller_start_rva", "call_rva", "iat_rva", "library", "name", "prototype_status", "return_type", "parameter_types", "prototype_source", "confidence", "arguments"],
+      "properties": {
+        "caller_start_rva": { "type": "integer", "minimum": 0 }, "call_rva": { "type": "integer", "minimum": 0 },
+        "iat_rva": { "type": "integer", "minimum": 0 }, "library": { "type": "string" }, "name": { "type": "string" },
+        "prototype_status": { "enum": ["catalogued", "unknown"] }, "return_type": { "type": "string" },
+        "parameter_types": { "type": "array", "items": { "type": "string" } }, "prototype_source": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "arguments": { "type": "array", "items": { "$ref": "#/$defs/callArgumentFlow" } }
+      }
+    },
+    "controlStructure": {
+      "type": "object", "additionalProperties": false,
+      "required": ["function_start_rva", "kind", "status", "test_rva", "join_block", "block_ids", "confidence", "reason", "evidence"],
+      "properties": {
+        "function_start_rva": { "type": "integer", "minimum": 0 }, "kind": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/stageStatus" },
+        "test_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "join_block": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "block_ids": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }, "reason": { "type": "string" },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } }
+      }
+    },
+    "rttiVtable": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type_name", "type_descriptor_rva", "complete_object_locator_rva", "class_hierarchy_descriptor_rva", "vtable_rva", "base_type_names", "virtual_method_rvas", "confidence", "evidence"],
+      "properties": {
+        "type_name": { "type": "string", "minLength": 1 },
+        "type_descriptor_rva": { "type": "integer", "minimum": 0 },
+        "complete_object_locator_rva": { "type": "integer", "minimum": 0 },
+        "class_hierarchy_descriptor_rva": { "type": "integer", "minimum": 0 },
+        "vtable_rva": { "type": "integer", "minimum": 0 },
+        "base_type_names": { "type": "array", "items": { "type": "string" } },
+        "virtual_method_rvas": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } }
+      }
+    },
+    "semanticAnalysis": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "backend", "architecture", "abi", "modeled_instruction_count", "unsupported_instruction_count", "unresolved_control_flow_count", "instructions", "functions", "basic_blocks", "cfg_edges", "call_graph", "reference"],
+      "properties": {
+        "status": { "$ref": "#/$defs/stageStatus" }, "backend": { "type": "string" },
+        "architecture": { "type": "string" }, "abi": { "type": "string" },
+        "modeled_instruction_count": { "type": "integer", "minimum": 0 },
+        "unsupported_instruction_count": { "type": "integer", "minimum": 0 },
+        "unresolved_control_flow_count": { "type": "integer", "minimum": 0 },
+        "instructions": { "type": "array", "items": { "$ref": "#/$defs/semanticInstruction" } },
+        "functions": { "type": "array", "items": { "$ref": "#/$defs/semanticFunction" } },
+        "basic_blocks": { "type": "array", "items": { "$ref": "#/$defs/basicBlock" } },
+        "cfg_edges": { "type": "array", "items": { "$ref": "#/$defs/cfgEdge" } },
+        "call_graph": { "type": "array", "items": { "$ref": "#/$defs/callEdge" } },
+        "reference": { "$ref": "#/$defs/referenceComparison" }
+      }
+    },
+    "semanticInstruction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["rva", "status", "operation", "condition", "operands", "registers_read", "registers_written", "flags_read", "flags_written", "flags_conditionally_written", "flags_undefined", "flags_preserved", "memory_read", "memory_written", "stack_action", "stack_delta", "control_flow", "target_rva", "unresolved_reason"],
+      "properties": {
+        "rva": { "type": "integer", "minimum": 0 }, "status": { "enum": ["modeled", "unsupported"] },
+        "operation": { "type": "string" }, "condition": { "type": "string" },
+        "operands": { "type": "array", "items": { "$ref": "#/$defs/x86Operand" } },
+        "registers_read": { "type": "array", "items": { "type": "string" } },
+        "registers_written": { "type": "array", "items": { "type": "string" } },
+        "flags_read": { "type": "array", "items": { "type": "string" } },
+        "flags_written": { "type": "array", "items": { "type": "string" } },
+        "flags_conditionally_written": { "type": "array", "items": { "type": "string" } },
+        "flags_undefined": { "type": "array", "items": { "type": "string" } },
+        "flags_preserved": { "type": "array", "items": { "type": "string" } },
+        "memory_read": { "type": "boolean" }, "memory_written": { "type": "boolean" },
+        "stack_action": { "type": "string" },
+        "stack_delta": { "oneOf": [{ "type": "integer" }, { "type": "null" }] },
+        "control_flow": { "enum": ["fallthrough", "conditional_branch", "direct_branch", "indirect_branch", "direct_call", "indirect_call", "return", "unknown"] },
+        "target_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "unresolved_reason": { "type": "string" }
+      }
+    },
+    "semanticFunction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["start_rva", "end_rva", "label", "provenance", "status", "boundary_ambiguous", "semantic_complete", "instruction_count", "unsupported_instruction_count", "unresolved_control_flow_count", "issues"],
+      "properties": {
+        "start_rva": { "type": "integer", "minimum": 0 },
+        "end_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "label": { "type": "string" }, "provenance": { "type": "string" },
+        "status": { "$ref": "#/$defs/stageStatus" }, "boundary_ambiguous": { "type": "boolean" }, "semantic_complete": { "type": "boolean" },
+        "instruction_count": { "type": "integer", "minimum": 0 },
+        "unsupported_instruction_count": { "type": "integer", "minimum": 0 },
+        "unresolved_control_flow_count": { "type": "integer", "minimum": 0 },
+        "issues": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "basicBlock": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "function_start_rva", "start_rva", "end_rva", "instruction_rvas"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 }, "function_start_rva": { "type": "integer", "minimum": 0 },
+        "start_rva": { "type": "integer", "minimum": 0 }, "end_rva": { "type": "integer", "minimum": 0 },
+        "instruction_rvas": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
+      }
+    },
+    "cfgEdge": {
+      "type": "object", "additionalProperties": false,
+      "required": ["function_start_rva", "from_block", "to_block", "from_rva", "target_rva", "kind", "provenance"],
+      "properties": {
+        "function_start_rva": { "type": "integer", "minimum": 0 }, "from_block": { "type": "integer", "minimum": 0 },
+        "to_block": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "from_rva": { "type": "integer", "minimum": 0 },
+        "target_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "kind": { "enum": ["direct_branch", "indirect_branch", "conditional_true", "conditional_false", "fallthrough", "call", "indirect_call", "unknown"] },
+        "provenance": { "type": "string", "minLength": 1 }
+      }
+    },
+    "callEdge": {
+      "type": "object", "additionalProperties": false,
+      "required": ["caller_start_rva", "call_rva", "target_rva", "resolution", "provenance"],
+      "properties": {
+        "caller_start_rva": { "type": "integer", "minimum": 0 }, "call_rva": { "type": "integer", "minimum": 0 },
+        "target_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "resolution": { "enum": ["direct_target", "unresolved_direct_target", "unresolved_indirect_target"] }, "provenance": { "type": "string" }
+      }
+    },
+    "referenceComparison": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "tool", "version", "input_sha256", "reference_function_count", "compared_flow_count", "difference_count", "differences"],
+      "properties": {
+        "status": { "enum": ["not_configured", "compared", "divergent", "invalid"] },
+        "tool": { "type": "string" }, "version": { "type": "string" },
+        "input_sha256": { "type": "string" }, "reference_function_count": { "type": "integer", "minimum": 0 },
+        "compared_flow_count": { "type": "integer", "minimum": 0 }, "difference_count": { "type": "integer", "minimum": 0 },
+        "differences": { "type": "array", "items": { "$ref": "#/$defs/referenceDifference" } }
+      }
+    },
+    "referenceDifference": {
+      "type": "object", "additionalProperties": false,
+      "required": ["category", "rva", "expected", "observed"],
+      "properties": {
+        "category": { "type": "string" },
+        "rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "expected": { "type": "string" }, "observed": { "type": "string" }
+      }
+    },
+    "gap": {
+      "type": "object", "additionalProperties": false,
+      "required": ["section_index", "rva", "va", "file_offset", "size", "bytes", "reason"],
+      "properties": {
+        "section_index": { "type": "integer", "minimum": 0 }, "rva": { "type": "integer", "minimum": 0 },
+        "va": { "type": "integer", "minimum": 0 }, "file_offset": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "size": { "type": "integer", "minimum": 1 }, "bytes": { "type": "string" }, "reason": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

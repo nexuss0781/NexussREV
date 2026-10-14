@@ -180,6 +180,8 @@ A phase is complete only when its exit gate is satisfied in CI and its artifacts
 - Install/build instructions work on a clean machine; dependency versions and licenses are auditable; outputs are deterministic for fixed inputs/configuration or document nondeterminism.
 - Release notes state exact supported inputs, known limitations and benchmark scope. Unsupported inputs fail or return partial status plainly—never fabricate complete output.
 
+**Phase 6 implementation status (2026-10-15): IMPLEMENTED; local gates pass, hosted Gate 6 pending.** The Linux sanitizer-enabled build passes all six CTest gates, including the frozen Phase 5 corpus baseline. The fixed-seed Clang libFuzzer+ASan+UBSan smoke completed 2,000 runs with no crash or sanitizer finding. The Linux CPack archive extracted and ran `--version`/`--help`; all 11 resolved vcpkg copyright notices matched the installed tree byte-for-byte. The CycloneDX 1.6 SBOM validator verified all 11 installed package versions, license declarations, encoded PURLs and dependency references. Hosted Linux/Windows CI remains required to validate the final release candidate and Windows package/DLL path. No Antigravity installer or checked-in sample was executed. See [`docs/phase6-validation.md`](docs/phase6-validation.md) and [`docs/phase6-release-notes.md`](docs/phase6-release-notes.md).
+
 ## 5. Library and tool selection
 
 | Tool | Recommended role | Important boundary |

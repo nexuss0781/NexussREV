@@ -1,4 +1,4 @@
-name: Phase 1/2/3/4/5 CI
+name: Phase 1/2/3/4/5/6 CI
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   linux-x64:
-    name: Linux x64 build and tests (Phase 1/2/3/4/5)
+    name: Linux x64 build, tests and release hardening (Phase 1/2/3/4/5/6)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -38,6 +38,42 @@ jobs:
         run: cmake --build build --parallel 2
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Generate SBOM and package
+        shell: bash
+        run: |
+          python3 tools/generate_sbom.py \
+            --installed-root build/vcpkg_installed \
+            --ports-root "$VCPKG_ROOT/ports" \
+            --platform linux-x64 \
+            --output build/sbom.cdx.json
+          python3 tests/sbom_smoke.py --sbom build/sbom.cdx.json --installed-root build/vcpkg_installed
+          cmake --build build --target package
+          archive="$(find build -maxdepth 1 -type f -name 'NexussREV-*.tar.gz' -print -quit)"
+          test -n "$archive"
+          python3 tests/package_smoke.py --archive "$archive" --installed-root build/vcpkg_installed --format tgz --platform linux-x64
+      - name: Build and run bounded Clang libFuzzer smoke
+        shell: bash
+        run: |
+          CC=clang CXX=clang++ cmake -S . -B build-fuzz \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/vcpkg_installed/x64-linux" \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DNEXUSREV_BUILD_FUZZERS=ON \
+            -DNEXUSREV_WARNINGS_AS_ERRORS=OFF
+          cmake --build build-fuzz --target nexusrev_phase6_fuzz --parallel 2
+          mkdir -p build-fuzz/corpus
+          cp tests/fuzz/corpus/* build-fuzz/corpus/
+          build-fuzz/nexusrev_phase6_fuzz -seed=20261015 -runs=2000 -max_len=4096 \
+            -timeout=5 -rss_limit_mb=1024 build-fuzz/corpus
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase6-linux-release
+          path: |
+            build/NexussREV-*.tar.gz
+            build/sbom.cdx.json
+            build/phase5-validation-results.json
+            build/phase4-benchmark-results.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -70,7 +106,7 @@ jobs:
           if-no-files-found: ignore
 
   windows-x64:
-    name: Windows x64 build and tests (Phase 1/2/3/4/5)
+    name: Windows x64 build, tests and release hardening (Phase 1/2/3/4/5/6)
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -100,6 +136,29 @@ jobs:
         run: cmake --build build --config Release --parallel 2
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Generate SBOM and package
+        shell: pwsh
+        run: |
+          python tools/generate_sbom.py `
+            --installed-root build/vcpkg_installed `
+            --ports-root "$env:VCPKG_ROOT/ports" `
+            --platform windows-x64 `
+            --output build/sbom.cdx.json
+          python tests/sbom_smoke.py --sbom build/sbom.cdx.json --installed-root build/vcpkg_installed
+          cmake --build build --config Release --target package
+          $archive = Get-ChildItem build -Filter 'NexussREV-*.zip' | Select-Object -First 1
+          if (-not $archive) { throw "CPack ZIP package not found" }
+          python tests/package_smoke.py --archive $archive.FullName --installed-root build/vcpkg_installed --format zip --platform windows-x64
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase6-windows-release
+          path: |
+            build/NexussREV-*.zip
+            build/sbom.cdx.json
+            build/phase5-validation-results.json
+            build/phase4-benchmark-results.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: always()
         with:

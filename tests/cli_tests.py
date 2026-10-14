@@ -44,7 +44,7 @@ def main():
     schema = json.loads(args.schema.read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator.check_schema(schema)
     report_validator = jsonschema.Draft202012Validator(schema)
-    assert schema["properties"]["schema_version"]["const"] == 5
+    assert schema["properties"]["schema_version"]["const"] == 6
     help_result = run(args.program, "--help")
     assert help_result.returncode == 0, help_result.stderr
     assert "not original source" in help_result.stdout
@@ -100,7 +100,7 @@ def main():
         assert report_path.is_file()
         report = json.loads(report_path.read_text(encoding="utf-8"))
         validate_report(report, report_validator)
-        assert report["schema_version"] == 5
+        assert report["schema_version"] == 6
         assert report["status"] == "partial"
         assert report["run"] == {
             "start_status": "running",

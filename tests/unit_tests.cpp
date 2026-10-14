@@ -1,4 +1,5 @@
 #include "sha256.hpp"
+#include "nexusrev.hpp"
 #include "pe_image.hpp"
 #include "phase3.hpp"
 #include "phase4.hpp"
@@ -137,6 +138,20 @@ bool pe_parser_tests() {
     auto unsupported = minimal_pe(); put16(unsupported, 0x84U, 0xaa64U);
     if (!nexusrev::PeImage::parse(std::move(unsupported), image, code, message) || image.supported_x64_native) {
         std::cerr << "unsupported machine was not identified without being treated as x64\n"; return false;
+    }
+    return true;
+}
+
+bool stop_control_tests() {
+    nexusrev::set_analysis_timeout_ms(60000U);
+    if (nexusrev::analysis_stop_reason() != nexusrev::StopReason::none) {
+        std::cerr << "unexpected stop state before cancellation test\n";
+        return false;
+    }
+    nexusrev::request_cancellation();
+    if (nexusrev::analysis_stop_reason() != nexusrev::StopReason::cancelled) {
+        std::cerr << "cancellation request was not visible to analysis checkpoints\n";
+        return false;
     }
     return true;
 }
@@ -591,6 +606,7 @@ int main() {
     if (!pe_parser_tests() || !semantic_operation_tests() || !cfg_and_reference_tests() ||
         !phase4_stack_and_signature_tests() || !phase4_import_dataflow_tests() ||
         !phase4_callee_type_propagation_tests() || !phase4_rtti_vtable_tests()) return 1;
+    if (!stop_control_tests()) return 1;
     std::cout << "SHA-256, PE parser, Phase 3 semantic/CFG, Phase 4 ABI/dataflow, and reference tests passed\n";
     return 0;
 }
