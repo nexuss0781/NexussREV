@@ -1,27 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://nexussrev.example/schemas/analysis-report-v1.schema.json",
+  "$id": "https://nexussrev.example/schemas/analysis-report-v2.schema.json",
   "title": "NexussREV Analysis Report",
-  "description": "Versioned Phase 0 report for static executable parsing and annotated disassembly. A partial report is not a claim of source recovery.",
+  "description": "Phase 1 report for bounded PE parsing and executable-byte decode accounting. Results do not claim source recovery.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "schema_version",
-    "status",
-    "run",
-    "input",
-    "tool",
-    "dependencies",
-    "stages",
-    "diagnostics",
-    "artifacts"
-  ],
+  "required": ["schema_version", "status", "run", "input", "tool", "dependencies", "pe", "decode", "stages", "diagnostics", "artifacts"],
   "properties": {
-    "schema_version": { "const": 1 },
+    "schema_version": { "const": 2 },
     "status": { "$ref": "#/$defs/stageStatus" },
     "run": {
-      "type": "object",
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
       "required": ["start_status", "end_status", "exit_code"],
       "properties": {
         "start_status": { "const": "running" },
@@ -30,17 +19,16 @@
       }
     },
     "input": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["path", "sha256"],
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "size_bytes"],
       "properties": {
         "path": { "type": "string", "minLength": 1 },
-        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "size_bytes": { "type": "integer", "minimum": 0 }
       }
     },
     "tool": {
-      "type": "object",
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
       "required": ["name", "version", "configuration_version"],
       "properties": {
         "name": { "const": "NexussREV" },
@@ -49,47 +37,220 @@
       }
     },
     "dependencies": {
-      "type": "object",
-      "additionalProperties": false,
+      "type": "object", "additionalProperties": false,
       "required": ["lief", "capstone"],
       "properties": {
         "lief": { "type": "string", "minLength": 1 },
         "capstone": { "type": "string", "minLength": 1 }
       }
     },
+    "pe": {
+      "type": "object", "additionalProperties": false,
+      "required": ["machine", "machine_name", "optional_header_magic", "pe32_plus", "supported_x64_native", "is_dll", "image_base", "entry_point", "section_alignment", "file_alignment", "size_of_image", "size_of_headers", "declared_directory_count", "sections", "data_directories", "imports", "exports", "base_relocations", "debug_entries", "tls", "runtime_functions", "clr", "diagnostics"],
+      "properties": {
+        "machine": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "machine_name": { "type": "string" },
+        "optional_header_magic": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "pe32_plus": { "type": "boolean" },
+        "supported_x64_native": { "type": "boolean" },
+        "is_dll": { "type": "boolean" },
+        "image_base": { "type": "integer", "minimum": 0 },
+        "entry_point": {
+          "type": "object", "additionalProperties": false,
+          "required": ["rva", "va", "file_offset"],
+          "properties": {
+            "rva": { "type": "integer", "minimum": 0 },
+            "va": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+            "file_offset": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] }
+          }
+        },
+        "section_alignment": { "type": "integer", "minimum": 0 },
+        "file_alignment": { "type": "integer", "minimum": 0 },
+        "size_of_image": { "type": "integer", "minimum": 0 },
+        "size_of_headers": { "type": "integer", "minimum": 0 },
+        "declared_directory_count": { "type": "integer", "minimum": 0, "maximum": 32 },
+        "sections": { "type": "array", "items": { "$ref": "#/$defs/section" } },
+        "data_directories": { "type": "array", "items": { "$ref": "#/$defs/dataDirectory" } },
+        "imports": { "type": "array", "items": { "$ref": "#/$defs/import" } },
+        "exports": { "type": "array", "items": { "$ref": "#/$defs/export" } },
+        "base_relocations": { "type": "array", "items": { "$ref": "#/$defs/relocation" } },
+        "debug_entries": { "type": "array", "items": { "$ref": "#/$defs/debugEntry" } },
+        "tls": { "$ref": "#/$defs/tls" },
+        "runtime_functions": { "type": "array", "items": { "$ref": "#/$defs/runtimeFunction" } },
+        "clr": { "$ref": "#/$defs/clr" },
+        "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
+      }
+    },
+    "decode": {
+      "type": "object", "additionalProperties": false,
+      "required": ["executable_file_backed_bytes", "processed_bytes", "decoded_bytes", "undecoded_bytes", "executable_zero_fill_bytes", "limited_bytes", "instruction_count", "instructions", "gaps"],
+      "properties": {
+        "executable_file_backed_bytes": { "type": "integer", "minimum": 0 },
+        "processed_bytes": { "type": "integer", "minimum": 0 },
+        "decoded_bytes": { "type": "integer", "minimum": 0 },
+        "undecoded_bytes": { "type": "integer", "minimum": 0 },
+        "executable_zero_fill_bytes": { "type": "integer", "minimum": 0 },
+        "limited_bytes": { "type": "integer", "minimum": 0 },
+        "instruction_count": { "type": "integer", "minimum": 0 },
+        "instructions": { "type": "array", "items": { "$ref": "#/$defs/instruction" } },
+        "gaps": { "type": "array", "items": { "$ref": "#/$defs/gap" } }
+      }
+    },
     "stages": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false,
         "required": ["name", "status"],
-        "properties": {
-          "name": { "type": "string", "minLength": 1 },
-          "status": { "$ref": "#/$defs/stageStatus" }
-        }
+        "properties": { "name": { "type": "string", "minLength": 1 }, "status": { "$ref": "#/$defs/stageStatus" } }
       }
     },
-    "diagnostics": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["code", "severity", "message"],
-        "properties": {
-          "code": { "type": "string", "minLength": 1 },
-          "severity": { "enum": ["info", "warning", "error"] },
-          "message": { "type": "string" }
-        }
-      }
-    },
-    "artifacts": {
-      "type": "array",
-      "items": { "type": "string", "minLength": 1 }
-    }
+    "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
+    "artifacts": { "type": "array", "items": { "type": "string", "minLength": 1 } }
   },
   "$defs": {
-    "stageStatus": {
-      "enum": ["complete", "partial", "unsupported", "failed"]
+    "stageStatus": { "enum": ["complete", "partial", "unsupported", "failed"] },
+    "diagnostic": {
+      "type": "object", "additionalProperties": false,
+      "required": ["code", "severity", "message"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["info", "warning", "error"] },
+        "message": { "type": "string" }
+      }
+    },
+    "section": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "rva", "virtual_size", "mapped_size", "file_offset", "raw_size", "file_backed_size", "zero_fill_size", "characteristics", "executable"],
+      "properties": {
+        "name": { "type": "string" }, "rva": { "type": "integer", "minimum": 0 },
+        "virtual_size": { "type": "integer", "minimum": 0 }, "mapped_size": { "type": "integer", "minimum": 0 },
+        "file_offset": { "type": "integer", "minimum": 0 }, "raw_size": { "type": "integer", "minimum": 0 },
+        "file_backed_size": { "type": "integer", "minimum": 0 }, "zero_fill_size": { "type": "integer", "minimum": 0 },
+        "characteristics": { "type": "integer", "minimum": 0 }, "executable": { "type": "boolean" }
+      }
+    },
+    "dataDirectory": {
+      "type": "object", "additionalProperties": false,
+      "required": ["index", "name", "rva_or_file_offset", "size", "address_kind"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 }, "name": { "type": "string" },
+        "rva_or_file_offset": { "type": "integer", "minimum": 0 }, "size": { "type": "integer", "minimum": 0 },
+        "address_kind": { "enum": ["rva", "file_offset"] }
+      }
+    },
+    "import": {
+      "type": "object", "additionalProperties": false,
+      "required": ["library", "name", "by_ordinal", "ordinal", "iat_rva"],
+      "properties": {
+        "library": { "type": "string" }, "name": { "type": "string" }, "by_ordinal": { "type": "boolean" },
+        "ordinal": { "type": "integer", "minimum": 0 }, "iat_rva": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "export": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "ordinal", "rva", "forwarded_to"],
+      "properties": { "name": { "type": "string" }, "ordinal": { "type": "integer", "minimum": 0 }, "rva": { "type": "integer", "minimum": 0 }, "forwarded_to": { "type": "string" } }
+    },
+    "relocation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["rva", "type"], "properties": { "rva": { "type": "integer", "minimum": 0 }, "type": { "type": "integer", "minimum": 0, "maximum": 15 } }
+    },
+    "debugEntry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "data_size", "data_rva", "data_file_offset", "codeview_guid", "codeview_age", "pdb_path"],
+      "properties": {
+        "type": { "type": "integer", "minimum": 0 }, "data_size": { "type": "integer", "minimum": 0 },
+        "data_rva": { "type": "integer", "minimum": 0 }, "data_file_offset": { "type": "integer", "minimum": 0 },
+        "codeview_guid": { "type": "string" }, "codeview_age": { "type": "integer", "minimum": 0 }, "pdb_path": { "type": "string" }
+      }
+    },
+    "tls": {
+      "type": "object", "additionalProperties": false,
+      "required": ["present", "raw_data_start_va", "raw_data_end_va", "index_va", "callbacks_va", "zero_fill_size", "characteristics", "callbacks"],
+      "properties": {
+        "present": { "type": "boolean" }, "raw_data_start_va": { "type": "integer", "minimum": 0 },
+        "raw_data_end_va": { "type": "integer", "minimum": 0 }, "index_va": { "type": "integer", "minimum": 0 },
+        "callbacks_va": { "type": "integer", "minimum": 0 }, "zero_fill_size": { "type": "integer", "minimum": 0 },
+        "characteristics": { "type": "integer", "minimum": 0 }, "callbacks": { "type": "array", "items": { "type": "integer", "minimum": 0 } }
+      }
+    },
+    "runtimeFunction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["begin_rva", "end_rva", "unwind_rva", "unwind_info_available", "unwind_version", "unwind_flags", "prolog_size", "unwind_code_count", "frame_register", "frame_offset"],
+      "properties": {
+        "begin_rva": { "type": "integer", "minimum": 0 }, "end_rva": { "type": "integer", "minimum": 0 },
+        "unwind_rva": { "type": "integer", "minimum": 0 }, "unwind_info_available": { "type": "boolean" },
+        "unwind_version": { "type": "integer", "minimum": 0 }, "unwind_flags": { "type": "integer", "minimum": 0 },
+        "prolog_size": { "type": "integer", "minimum": 0 }, "unwind_code_count": { "type": "integer", "minimum": 0 },
+        "frame_register": { "type": "integer", "minimum": 0 }, "frame_offset": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "clr": {
+      "type": "object", "additionalProperties": false,
+      "required": ["present", "header_size", "metadata_rva", "metadata_size", "flags", "entry_point", "il_only"],
+      "properties": {
+        "present": { "type": "boolean" }, "header_size": { "type": "integer", "minimum": 0 },
+        "metadata_rva": { "type": "integer", "minimum": 0 }, "metadata_size": { "type": "integer", "minimum": 0 },
+        "flags": { "type": "integer", "minimum": 0 }, "entry_point": { "type": "integer", "minimum": 0 }, "il_only": { "type": "boolean" }
+      }
+    },
+    "instruction": {
+      "type": "object", "additionalProperties": false,
+      "required": ["section_index", "va", "rva", "file_offset", "bytes", "mnemonic", "operands", "detail"],
+      "properties": {
+        "section_index": { "type": "integer", "minimum": 0 }, "va": { "type": "integer", "minimum": 0 },
+        "rva": { "type": "integer", "minimum": 0 }, "file_offset": { "type": "integer", "minimum": 0 },
+        "bytes": { "type": "string" }, "mnemonic": { "type": "string" }, "operands": { "type": "string" },
+        "detail": { "$ref": "#/$defs/instructionDetail" }
+      }
+    },
+    "instructionDetail": {
+      "type": "object", "additionalProperties": false,
+      "required": ["available", "instruction_id", "instruction_name", "groups", "registers_read", "registers_written", "prefixes", "opcodes", "rex", "address_size", "modrm", "sib", "displacement", "flags", "encoding", "operands"],
+      "properties": {
+        "available": { "type": "boolean" }, "instruction_id": { "type": "integer", "minimum": 0 },
+        "instruction_name": { "type": "string" }, "groups": { "type": "array", "items": { "type": "string" } },
+        "registers_read": { "type": "array", "items": { "type": "string" } },
+        "registers_written": { "type": "array", "items": { "type": "string" } },
+        "prefixes": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "integer", "minimum": 0, "maximum": 255 } },
+        "opcodes": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "integer", "minimum": 0, "maximum": 255 } },
+        "rex": { "type": "integer", "minimum": 0, "maximum": 255 }, "address_size": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "modrm": { "type": "integer", "minimum": 0, "maximum": 255 }, "sib": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "displacement": { "type": "integer" }, "flags": { "type": "integer", "minimum": 0 },
+        "encoding": { "$ref": "#/$defs/x86Encoding" },
+        "operands": { "type": "array", "items": { "$ref": "#/$defs/x86Operand" } }
+      }
+    },
+    "x86Encoding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["modrm_offset", "displacement_offset", "displacement_size", "immediate_offset", "immediate_size"],
+      "properties": {
+        "modrm_offset": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "displacement_offset": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "displacement_size": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "immediate_offset": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "immediate_size": { "type": "integer", "minimum": 0, "maximum": 255 }
+      }
+    },
+    "x86Operand": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "size", "access", "register", "immediate", "segment", "base", "index", "scale", "displacement", "avx_broadcast", "avx_zero_opmask"],
+      "properties": {
+        "type": { "enum": ["register", "immediate", "memory", "invalid"] },
+        "size": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "access": { "type": "integer", "minimum": 0, "maximum": 255 }, "register": { "type": "string" },
+        "immediate": { "type": "integer" }, "segment": { "type": "string" }, "base": { "type": "string" },
+        "index": { "type": "string" }, "scale": { "type": "integer" }, "displacement": { "type": "integer" },
+        "avx_broadcast": { "type": "integer", "minimum": 0, "maximum": 255 }, "avx_zero_opmask": { "type": "boolean" }
+      }
+    },
+    "gap": {
+      "type": "object", "additionalProperties": false,
+      "required": ["section_index", "rva", "va", "file_offset", "size", "bytes", "reason"],
+      "properties": {
+        "section_index": { "type": "integer", "minimum": 0 }, "rva": { "type": "integer", "minimum": 0 },
+        "va": { "type": "integer", "minimum": 0 }, "file_offset": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "size": { "type": "integer", "minimum": 1 }, "bytes": { "type": "string" }, "reason": { "type": "string", "minLength": 1 }
+      }
     }
   }
 }

@@ -1,4 +1,4 @@
-name: Phase 0 CI
+name: Phase 1 CI
 
 on:
   push:
@@ -31,6 +31,7 @@ jobs:
           -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
           -DCMAKE_BUILD_TYPE=Release
           -DNEXUSREV_ENABLE_SANITIZERS=ON
+          -DNEXUSREV_WARNINGS_AS_ERRORS=ON
       - name: Build
         run: cmake --build build --parallel 2
       - name: Test
@@ -60,6 +61,7 @@ jobs:
           cmake -S . -B build -A x64
           "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
           -DCMAKE_BUILD_TYPE=Release
+          -DNEXUSREV_WARNINGS_AS_ERRORS=ON
       - name: Build
         run: cmake --build build --config Release --parallel 2
       - name: Test

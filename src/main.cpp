@@ -34,8 +34,9 @@ void print_usage(std::ostream& output, const char* executable) {
     output << "Usage: " << executable
            << " [--format disassembly] [--report-json <path>] <input.exe> <output>\n"
            << "       " << executable << " --help\n\n"
-           << "The two-path form is the compatibility mode. Output is annotated disassembly,\n"
-           << "not original source code or guaranteed compilable C/C++. A JSON report is\n"
+           << "The two-path form is the compatibility mode. Phase 1 analyzes native PE32+ x86-64.\n"
+           << "Output is annotated disassembly, not original source code or guaranteed compilable C/C++.\n"
+           << "Unsupported architectures and CLR/.NET images are identified, not decoded as x64. A JSON report is\n"
            << "written to <output>.report.json unless --report-json is specified.\n";
 }
 
@@ -62,7 +63,7 @@ bool parse_arguments(int argc, char** argv, CliOptions& options, bool& show_help
             }
             options.format = argv[++index];
             if (options.format != "disassembly") {
-                error = "unsupported format; only 'disassembly' is available in Phase 0";
+                error = "unsupported format; only 'disassembly' is available";
                 return false;
             }
             continue;
@@ -216,9 +217,9 @@ int main(int argc, char** argv) {
             return kAnalysisFailure;
         }
 
-        report.status = "partial";
         report.stages.push_back({"emission", "complete"});
         report.artifacts = {options.output_path, options.report_path};
+        report.exit_code = 0;
         const std::string disassembly = decompiler.emit_annotated_disassembly(report);
         const std::string report_json = nexusrev::report_to_json(report);
 
@@ -228,7 +229,7 @@ int main(int argc, char** argv) {
             return kOutputFailure;
         }
         print_diagnostics(report);
-        std::cout << "[partial] Wrote annotated disassembly and analysis report.\n";
+        std::cout << '[' << report.status << "] Wrote annotated disassembly and analysis report.\n";
         return 0;
     } catch (const std::exception& exception) {
         std::cerr << "INTERNAL_ERROR: " << exception.what() << '\n';

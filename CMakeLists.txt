@@ -14,7 +14,8 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 add_executable(nexusrev
     src/main.cpp
-    src/nexusrev.cpp
+    src/phase1.cpp
+    src/pe_image.cpp
     src/sha256.cpp
 )
 target_include_directories(nexusrev PRIVATE include)
@@ -48,6 +49,7 @@ nexusrev_apply_build_options(nexusrev)
 enable_testing()
 add_executable(nexusrev_unit_tests
     tests/unit_tests.cpp
+    src/pe_image.cpp
     src/sha256.cpp
 )
 target_include_directories(nexusrev_unit_tests PRIVATE include)
@@ -59,5 +61,7 @@ add_test(
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli_tests.py
             --program $<TARGET_FILE:nexusrev>
             --fixture ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/minimal-pe-x64.exe
+            --generator ${CMAKE_CURRENT_SOURCE_DIR}/tests/make_phase1_fixture.py
+            --compiler-fixture ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/compiler-generated-x64.exe
 )
 set_tests_properties(nexusrev_cli_tests PROPERTIES TIMEOUT 30)
