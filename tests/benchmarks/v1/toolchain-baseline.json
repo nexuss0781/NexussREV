@@ -1,0 +1,1531 @@
+{
+  "format_version": 1,
+  "matrix_manifest": "toolchain-matrix.json",
+  "measured_commit": "291099ab23c3ba1b816027fc825f4408fb36c4b0",
+  "name": "NexussREV Phase 2 hosted cross-toolchain baseline",
+  "run_id": 38595104195,
+  "run_url": "https://github.com/nexuss0781/NexussREV/actions/runs/38595104195",
+  "source_sha256": "9bbbf1c673ce7365a51b28d9a9cbe3b9cc9bea045baf718c856a65c1ba880d92",
+  "thresholds": {
+    "dwarf_present_no_pdb": {
+      "ranges": {
+        "min_precision": 0.8,
+        "min_recall": 0.5
+      },
+      "starts": {
+        "min_precision": 0.8,
+        "min_recall": 0.5
+      }
+    },
+    "pdb_present": {
+      "ranges": {
+        "min_precision": 1.0,
+        "min_recall": 1.0
+      },
+      "starts": {
+        "min_precision": 1.0,
+        "min_recall": 1.0
+      }
+    },
+    "stripped": {
+      "ranges": {
+        "min_precision": 0.8,
+        "min_recall": 0.375
+      },
+      "starts": {
+        "min_precision": 0.8,
+        "min_recall": 0.5
+      }
+    }
+  },
+  "toolchains": {
+    "clang-cl": {
+      "case_count": 8,
+      "cases": [
+        {
+          "binary_kind": "DLL",
+          "compiler_mode": "clang-cl",
+          "compiler_version": "clang version 20.1.8",
+          "evidence_class": "pdb_present",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "clang-cl-o0-dll-debug",
+          "input_sha256": "e27af159b64024b13006487692872950bc3bc928714414272d12882205a4d317",
+          "linker_version": "LLD 20.1.8",
+          "optimization": "O0",
+          "pdb_sha256": "6348babff2db3cb4fb33310115a4e985351cc629634471d7e35bcdd9732dde7b",
+          "symbol_status": "matched",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4110,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4136,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4112,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4167,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4144,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4190,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4176,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "DLL",
+          "compiler_mode": "clang-cl",
+          "compiler_version": "clang version 20.1.8",
+          "evidence_class": "stripped",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "clang-cl-o0-dll-stripped",
+          "input_sha256": "e541cb3ce93809787a770c58015345c53e854472fb07de67e800deee9aa61013",
+          "linker_version": "LLD 20.1.8",
+          "optimization": "O0",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4110,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4136,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4112,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4167,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4144,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4190,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4176,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "EXE",
+          "compiler_mode": "clang-cl",
+          "compiler_version": "clang version 20.1.8",
+          "evidence_class": "pdb_present",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "clang-cl-o0-exe-debug",
+          "input_sha256": "eb30122524b2ef5f9a6d4ee049e419ac9c969efa8b724fedf6fa820b6637b4eb",
+          "linker_version": "LLD 20.1.8",
+          "optimization": "O0",
+          "pdb_sha256": "e8e26eee8a1ef83b39f5f7aa7868120139c84b0350e648dbf92b677b19dc1a3e",
+          "symbol_status": "matched",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4110,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4136,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4112,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4167,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4144,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4190,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4176,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "EXE",
+          "compiler_mode": "clang-cl",
+          "compiler_version": "clang version 20.1.8",
+          "evidence_class": "stripped",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "clang-cl-o0-exe-stripped",
+          "input_sha256": "eae36ff27c106b314cf7340d3421b4907118021d1a8db42cf385bb64369ed42f",
+          "linker_version": "LLD 20.1.8",
+          "optimization": "O0",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4110,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4136,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4112,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4167,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4144,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4190,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4176,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "DLL",
+          "compiler_mode": "clang-cl",
+          "compiler_version": "clang version 20.1.8",
+          "evidence_class": "pdb_present",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "clang-cl-o2-dll-debug",
+          "input_sha256": "d05cf39fd7c0f234b63e7490dcde72a4d7a9b6ffb2d7a060991b4b6d1d78a3b8",
+          "linker_version": "LLD 20.1.8",
+          "optimization": "O2",
+          "pdb_sha256": "899e3ac92c1905610c52d7ee53c18425b27cd8a8b8ebe229b06d098df5604959",
+          "symbol_status": "matched",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4100,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4128,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4112,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4133,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4128,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4150,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4144,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "DLL",
+          "compiler_mode": "clang-cl",
+          "compiler_version": "clang version 20.1.8",
+          "evidence_class": "stripped",
+          "function_ranges": {
+            "false_negative": 3,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.25,
+            "true_positive": 1
+          },
+          "function_starts": {
+            "false_negative": 2,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.5,
+            "true_positive": 2
+          },
+          "id": "clang-cl-o2-dll-stripped",
+          "input_sha256": "9f0f586ac017dd868c56e71209d6e1bd3080028d64b4a9d592034abc1475a349",
+          "linker_version": "LLD 20.1.8",
+          "optimization": "O2",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4100,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4128,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4112,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4133,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4128,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4150,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4144,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "EXE",
+          "compiler_mode": "clang-cl",
+          "compiler_version": "clang version 20.1.8",
+          "evidence_class": "pdb_present",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "clang-cl-o2-exe-debug",
+          "input_sha256": "d7f85c466df5dbbfe5a4093ffe40ef5775465031599080d148905db7f8fafa35",
+          "linker_version": "LLD 20.1.8",
+          "optimization": "O2",
+          "pdb_sha256": "98060f0430afa36d60da841a4e3733c68fb7ae7db1578bac47110f1eb5d59387",
+          "symbol_status": "matched",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4100,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4128,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4112,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4133,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4128,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4150,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4144,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "EXE",
+          "compiler_mode": "clang-cl",
+          "compiler_version": "clang version 20.1.8",
+          "evidence_class": "stripped",
+          "function_ranges": {
+            "false_negative": 3,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.25,
+            "true_positive": 1
+          },
+          "function_starts": {
+            "false_negative": 2,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.5,
+            "true_positive": 2
+          },
+          "id": "clang-cl-o2-exe-stripped",
+          "input_sha256": "ca2629656432337456ecba414e0aeac588bad96b317b89fde5bbe33508c81b66",
+          "linker_version": "LLD 20.1.8",
+          "optimization": "O2",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4100,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4128,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4112,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4133,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4128,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4150,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4144,
+              "type_index": 4097
+            }
+          ]
+        }
+      ],
+      "compiler": "Clang clang-cl.exe",
+      "compiler_mode": "clang-cl",
+      "compiler_version": "clang version 20.1.8",
+      "fixture_source": "../../fixtures/phase2/corpus.c",
+      "grouped_metrics": {
+        "pdb_present": {
+          "ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 16
+          },
+          "starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 16
+          }
+        },
+        "stripped": {
+          "ranges": {
+            "false_negative": 6,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.625,
+            "true_positive": 10
+          },
+          "starts": {
+            "false_negative": 4,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.75,
+            "true_positive": 12
+          }
+        }
+      },
+      "linker": "LLVM lld-link.exe",
+      "linker_version": "LLD 20.1.8",
+      "matrix_version": 1,
+      "source_sha256": "9bbbf1c673ce7365a51b28d9a9cbe3b9cc9bea045baf718c856a65c1ba880d92",
+      "truth_source": "procedure records from matching MSF PDB GUID/age"
+    },
+    "mingw": {
+      "case_count": 8,
+      "cases": [
+        {
+          "binary_kind": "DLL",
+          "compiler_mode": "mingw",
+          "compiler_version": "x86_64-w64-mingw32-gcc (GCC) 13-win32",
+          "evidence_class": "dwarf_present_no_pdb",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "mingw-o0-dll-debug",
+          "input_sha256": "951d472155b7f937f2018cfcaa3d2db7288399b4abc20d71ef13fc50800740af",
+          "linker_version": "13-win32",
+          "optimization": "O0",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "end_rva": 4111,
+              "name": "add_one",
+              "start_rva": 4096
+            },
+            {
+              "end_rva": 4141,
+              "name": "call_add",
+              "start_rva": 4112
+            },
+            {
+              "end_rva": 4171,
+              "name": "call_helper",
+              "start_rva": 4144
+            },
+            {
+              "end_rva": 4191,
+              "name": "private_helper",
+              "start_rva": 4176
+            }
+          ]
+        },
+        {
+          "binary_kind": "DLL",
+          "compiler_mode": "mingw",
+          "compiler_version": "x86_64-w64-mingw32-gcc (GCC) 13-win32",
+          "evidence_class": "stripped",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "mingw-o0-dll-stripped",
+          "input_sha256": "87656ac8697c41180aa9ba601d698362584a5faf768f6b999fef565dc681a665",
+          "linker_version": "13-win32",
+          "optimization": "O0",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "end_rva": 4111,
+              "name": "add_one",
+              "start_rva": 4096
+            },
+            {
+              "end_rva": 4141,
+              "name": "call_add",
+              "start_rva": 4112
+            },
+            {
+              "end_rva": 4171,
+              "name": "call_helper",
+              "start_rva": 4144
+            },
+            {
+              "end_rva": 4191,
+              "name": "private_helper",
+              "start_rva": 4176
+            }
+          ]
+        },
+        {
+          "binary_kind": "EXE",
+          "compiler_mode": "mingw",
+          "compiler_version": "x86_64-w64-mingw32-gcc (GCC) 13-win32",
+          "evidence_class": "dwarf_present_no_pdb",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "mingw-o0-exe-debug",
+          "input_sha256": "c97bfd82b1a0897a0626718c9d39bf6c8f65ad06778462f7996ded36cf9bc298",
+          "linker_version": "13-win32",
+          "optimization": "O0",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "end_rva": 4111,
+              "name": "add_one",
+              "start_rva": 4096
+            },
+            {
+              "end_rva": 4141,
+              "name": "call_add",
+              "start_rva": 4112
+            },
+            {
+              "end_rva": 4171,
+              "name": "call_helper",
+              "start_rva": 4144
+            },
+            {
+              "end_rva": 4191,
+              "name": "private_helper",
+              "start_rva": 4176
+            }
+          ]
+        },
+        {
+          "binary_kind": "EXE",
+          "compiler_mode": "mingw",
+          "compiler_version": "x86_64-w64-mingw32-gcc (GCC) 13-win32",
+          "evidence_class": "stripped",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "mingw-o0-exe-stripped",
+          "input_sha256": "2115edf60450c731a5fa7da92726c321befd5241740ffa741a5363800db45e41",
+          "linker_version": "13-win32",
+          "optimization": "O0",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "end_rva": 4111,
+              "name": "add_one",
+              "start_rva": 4096
+            },
+            {
+              "end_rva": 4141,
+              "name": "call_add",
+              "start_rva": 4112
+            },
+            {
+              "end_rva": 4171,
+              "name": "call_helper",
+              "start_rva": 4144
+            },
+            {
+              "end_rva": 4191,
+              "name": "private_helper",
+              "start_rva": 4176
+            }
+          ]
+        },
+        {
+          "binary_kind": "DLL",
+          "compiler_mode": "mingw",
+          "compiler_version": "x86_64-w64-mingw32-gcc (GCC) 13-win32",
+          "evidence_class": "dwarf_present_no_pdb",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "mingw-o2-dll-debug",
+          "input_sha256": "b73053dd8baf05c7c82ba60983afb32c414435257aaf039cd455a1c0ac2e928b",
+          "linker_version": "13-win32",
+          "optimization": "O2",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "end_rva": 4100,
+              "name": "add_one",
+              "start_rva": 4096
+            },
+            {
+              "end_rva": 4128,
+              "name": "call_add",
+              "start_rva": 4112
+            },
+            {
+              "end_rva": 4133,
+              "name": "call_helper",
+              "start_rva": 4128
+            },
+            {
+              "end_rva": 4150,
+              "name": "private_helper",
+              "start_rva": 4144
+            }
+          ]
+        },
+        {
+          "binary_kind": "DLL",
+          "compiler_mode": "mingw",
+          "compiler_version": "x86_64-w64-mingw32-gcc (GCC) 13-win32",
+          "evidence_class": "stripped",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "mingw-o2-dll-stripped",
+          "input_sha256": "64487e302b8249d9b753180c4b940b578d66b8ba997b63333b841810dbd4a9b2",
+          "linker_version": "13-win32",
+          "optimization": "O2",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "end_rva": 4100,
+              "name": "add_one",
+              "start_rva": 4096
+            },
+            {
+              "end_rva": 4128,
+              "name": "call_add",
+              "start_rva": 4112
+            },
+            {
+              "end_rva": 4133,
+              "name": "call_helper",
+              "start_rva": 4128
+            },
+            {
+              "end_rva": 4150,
+              "name": "private_helper",
+              "start_rva": 4144
+            }
+          ]
+        },
+        {
+          "binary_kind": "EXE",
+          "compiler_mode": "mingw",
+          "compiler_version": "x86_64-w64-mingw32-gcc (GCC) 13-win32",
+          "evidence_class": "dwarf_present_no_pdb",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "mingw-o2-exe-debug",
+          "input_sha256": "70daa49487b434137d65cd526a0f14fec721a87a3dde91dde10ef2861f6ebf6a",
+          "linker_version": "13-win32",
+          "optimization": "O2",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "end_rva": 4100,
+              "name": "add_one",
+              "start_rva": 4096
+            },
+            {
+              "end_rva": 4128,
+              "name": "call_add",
+              "start_rva": 4112
+            },
+            {
+              "end_rva": 4133,
+              "name": "call_helper",
+              "start_rva": 4128
+            },
+            {
+              "end_rva": 4150,
+              "name": "private_helper",
+              "start_rva": 4144
+            }
+          ]
+        },
+        {
+          "binary_kind": "EXE",
+          "compiler_mode": "mingw",
+          "compiler_version": "x86_64-w64-mingw32-gcc (GCC) 13-win32",
+          "evidence_class": "stripped",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "mingw-o2-exe-stripped",
+          "input_sha256": "e3e0b9442808f151023d3ea3dc916cf59c84c0926d3868d21227a760be254357",
+          "linker_version": "13-win32",
+          "optimization": "O2",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "end_rva": 4100,
+              "name": "add_one",
+              "start_rva": 4096
+            },
+            {
+              "end_rva": 4128,
+              "name": "call_add",
+              "start_rva": 4112
+            },
+            {
+              "end_rva": 4133,
+              "name": "call_helper",
+              "start_rva": 4128
+            },
+            {
+              "end_rva": 4150,
+              "name": "private_helper",
+              "start_rva": 4144
+            }
+          ]
+        }
+      ],
+      "compiler": "MinGW-w64 GCC",
+      "compiler_mode": "mingw",
+      "compiler_version": "x86_64-w64-mingw32-gcc (GCC) 13-win32",
+      "fixture_source": "../../fixtures/phase2/corpus.c",
+      "grouped_metrics": {
+        "dwarf_present_no_pdb": {
+          "ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 16
+          },
+          "starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 16
+          }
+        },
+        "stripped": {
+          "ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 16
+          },
+          "starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 16
+          }
+        }
+      },
+      "linker": "GNU ld via the MinGW GCC driver",
+      "linker_version": "13-win32",
+      "matrix_version": 1,
+      "source_sha256": "9bbbf1c673ce7365a51b28d9a9cbe3b9cc9bea045baf718c856a65c1ba880d92",
+      "truth_source": "DWARF subprogram low_pc/high_pc in the debug-enabled companion; this toolchain does not emit PDBs"
+    },
+    "msvc": {
+      "case_count": 8,
+      "cases": [
+        {
+          "binary_kind": "DLL",
+          "compiler_mode": "msvc",
+          "compiler_version": "Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35229 for x64",
+          "evidence_class": "pdb_present",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "msvc-o0-dll-debug",
+          "input_sha256": "7d40c9059a4263a8a757072847b3c896b86d5a85702a43042721163b29132499",
+          "linker_version": "Microsoft (R) Incremental Linker Version 14.44.35229.0",
+          "optimization": "O0",
+          "pdb_sha256": "2c8ba4b6a9f6cdb5cdc679907224ac2cad64c7b78908a5c7414756b4ada47928",
+          "symbol_status": "matched",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4107,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4152,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4128,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4172,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4160,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4214,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4192,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "DLL",
+          "compiler_mode": "msvc",
+          "compiler_version": "Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35229 for x64",
+          "evidence_class": "stripped",
+          "function_ranges": {
+            "false_negative": 2,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.5,
+            "true_positive": 2
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "msvc-o0-dll-stripped",
+          "input_sha256": "66ec0396973ff57fa2768978c99fbe6773335345acbad0984d4465d34ac1cd8a",
+          "linker_version": "Microsoft (R) Incremental Linker Version 14.44.35229.0",
+          "optimization": "O0",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4107,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4152,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4128,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4172,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4160,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4214,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4192,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "EXE",
+          "compiler_mode": "msvc",
+          "compiler_version": "Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35229 for x64",
+          "evidence_class": "pdb_present",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "msvc-o0-exe-debug",
+          "input_sha256": "a05241c0c29cdce5cc7d19045f5e54cacd44a48e5b6b059c20d74802bad83406",
+          "linker_version": "Microsoft (R) Incremental Linker Version 14.44.35229.0",
+          "optimization": "O0",
+          "pdb_sha256": "6e51149dc26adbaa8f10e6145cd11808f3e460136555d21a29ffe8ea0df6eb17",
+          "symbol_status": "matched",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4107,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4152,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4128,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4172,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4160,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4214,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4192,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "EXE",
+          "compiler_mode": "msvc",
+          "compiler_version": "Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35229 for x64",
+          "evidence_class": "stripped",
+          "function_ranges": {
+            "false_negative": 2,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.5,
+            "true_positive": 2
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "msvc-o0-exe-stripped",
+          "input_sha256": "0b55e4262c7d77f9c19905f53669d6ae9ff76a42841fa6dd9112dface85b1b45",
+          "linker_version": "Microsoft (R) Incremental Linker Version 14.44.35229.0",
+          "optimization": "O0",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4107,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4152,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4128,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4172,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4160,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4214,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4192,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "DLL",
+          "compiler_mode": "msvc",
+          "compiler_version": "Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35229 for x64",
+          "evidence_class": "pdb_present",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "msvc-o2-dll-debug",
+          "input_sha256": "f62b6d9b586f8ed50fb8b5eefa350eda6e3f12898f46c06bc59c7aa61306b532",
+          "linker_version": "Microsoft (R) Incremental Linker Version 14.44.35229.0",
+          "optimization": "O2",
+          "pdb_sha256": "eb7bd1b8e0363302b7d7c1e23f94b5f18c25326cfdf39bf92a8e3a039410d1a9",
+          "symbol_status": "matched",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4100,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4128,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4112,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4133,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4128,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4150,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4144,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "DLL",
+          "compiler_mode": "msvc",
+          "compiler_version": "Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35229 for x64",
+          "evidence_class": "stripped",
+          "function_ranges": {
+            "false_negative": 3,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.25,
+            "true_positive": 1
+          },
+          "function_starts": {
+            "false_negative": 2,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.5,
+            "true_positive": 2
+          },
+          "id": "msvc-o2-dll-stripped",
+          "input_sha256": "832da0d737c1cfff6761ff789c9d0313de96b7705cf375a94be81fe3277b396a",
+          "linker_version": "Microsoft (R) Incremental Linker Version 14.44.35229.0",
+          "optimization": "O2",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4100,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4128,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4112,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4133,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4128,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4150,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4144,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "EXE",
+          "compiler_mode": "msvc",
+          "compiler_version": "Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35229 for x64",
+          "evidence_class": "pdb_present",
+          "function_ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "function_starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 4
+          },
+          "id": "msvc-o2-exe-debug",
+          "input_sha256": "a65c34a0ae71aa67e0e76a6d6e627f981bc53d13e23a112de5f61b03f2e6c841",
+          "linker_version": "Microsoft (R) Incremental Linker Version 14.44.35229.0",
+          "optimization": "O2",
+          "pdb_sha256": "b2daa7e1932ba1407ac3deafaf6a982aa34dac096e83ae52918d80c7ea123b8b",
+          "symbol_status": "matched",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4100,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4128,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4112,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4133,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4128,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4150,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4144,
+              "type_index": 4097
+            }
+          ]
+        },
+        {
+          "binary_kind": "EXE",
+          "compiler_mode": "msvc",
+          "compiler_version": "Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35229 for x64",
+          "evidence_class": "stripped",
+          "function_ranges": {
+            "false_negative": 3,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.25,
+            "true_positive": 1
+          },
+          "function_starts": {
+            "false_negative": 2,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.5,
+            "true_positive": 2
+          },
+          "id": "msvc-o2-exe-stripped",
+          "input_sha256": "609f632301c27d4550f0281c206f21918d0cfe4e36e41953d40b1fdd393c188f",
+          "linker_version": "Microsoft (R) Incremental Linker Version 14.44.35229.0",
+          "optimization": "O2",
+          "pdb_sha256": null,
+          "symbol_status": "not_present",
+          "truth": [
+            {
+              "confidence": 1,
+              "end_rva": 4100,
+              "name": "add_one",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4096,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4128,
+              "name": "call_add",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4112,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4133,
+              "name": "call_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4128,
+              "type_index": 4097
+            },
+            {
+              "confidence": 1,
+              "end_rva": 4150,
+              "name": "private_helper",
+              "provenance": "pdb_procedure_record",
+              "start_rva": 4144,
+              "type_index": 4097
+            }
+          ]
+        }
+      ],
+      "compiler": "Microsoft Visual C++ cl.exe",
+      "compiler_mode": "msvc",
+      "compiler_version": "Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35229 for x64",
+      "fixture_source": "../../fixtures/phase2/corpus.c",
+      "grouped_metrics": {
+        "pdb_present": {
+          "ranges": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 16
+          },
+          "starts": {
+            "false_negative": 0,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positive": 16
+          }
+        },
+        "stripped": {
+          "ranges": {
+            "false_negative": 10,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.375,
+            "true_positive": 6
+          },
+          "starts": {
+            "false_negative": 4,
+            "false_positive": 0,
+            "precision": 1.0,
+            "recall": 0.75,
+            "true_positive": 12
+          }
+        }
+      },
+      "linker": "Microsoft link.exe",
+      "linker_version": "Microsoft (R) Incremental Linker Version 14.44.35229.0",
+      "matrix_version": 1,
+      "source_sha256": "9bbbf1c673ce7365a51b28d9a9cbe3b9cc9bea045baf718c856a65c1ba880d92",
+      "truth_source": "procedure records from matching MSF PDB GUID/age"
+    }
+  }
+}

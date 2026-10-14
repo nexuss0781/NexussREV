@@ -39,6 +39,21 @@ CI generates these binaries from `corpus.c`, analyzes them strictly as data (nev
 
 The first hosted MSVC measurement with a matching PDB passed the 1.000 symbol-backed start/range floors. Its stripped-range recall was **0.375**, below the initial provisional 0.500 floor; all other stripped floors were met ([Actions run 38593357564](https://github.com/nexuss0781/NexussREV/actions/runs/38593357564)). Accordingly, the versioned generated-matrix floor is now 0.375 for stripped range recall, based on that measured MSVC baseline rather than an unmeasured assumption. Keep the original Clang/LLD numeric baseline and its 0.625 stripped-range recall unchanged. Any future increase to the generated-matrix floor requires new reviewed toolchain evidence. Threshold failures also preserve a per-case JSON report so the discrepancy is auditable.
 
+### Hosted cross-toolchain baseline
+
+The final hosted run [38595104195](https://github.com/nexuss0781/NexussREV/actions/runs/38595104195) passed Linux and Windows CI and generated all 24 cases (eight per toolchain). The persistent [`toolchain-baseline.json`](toolchain-baseline.json) locks the compiler versions, per-case truth/ranges, input/PDB hashes, grouped metrics, thresholds, source identity and commit for this run; the linked Actions run also retains downloadable artifacts.
+
+| Toolchain (compiler / linker) | Evidence class | Function starts P/R | Function ranges P/R |
+|---|---|---:|---:|
+| MSVC 19.44.35229 / 14.44.35229.0 | Matching PDB | 1.000 / 1.000 (16/16) | 1.000 / 1.000 (16/16) |
+| MSVC 19.44.35229 / 14.44.35229.0 | Stripped | 1.000 / 0.750 (12/16) | 1.000 / 0.375 (6/16) |
+| clang-cl 20.1.8 / LLD 20.1.8 | Matching PDB | 1.000 / 1.000 (16/16) | 1.000 / 1.000 (16/16) |
+| clang-cl 20.1.8 / LLD 20.1.8 | Stripped | 1.000 / 0.750 (12/16) | 1.000 / 0.625 (10/16) |
+| MinGW GCC 13-win32 | DWARF present, no PDB | 1.000 / 1.000 (16/16) | 1.000 / 1.000 (16/16) |
+| MinGW GCC 13-win32 | Stripped | 1.000 / 1.000 (16/16) | 1.000 / 1.000 (16/16) |
+
+P/R is exact-match precision/recall; the parenthetical reports true positives / labelled truths. All three measured groups had zero false positives. The MSVC stripped-range result is the limiting measured class and sets the generated-matrix minimum; it is reported as a limitation, not hidden by the stronger Clang/LLD or MinGW results.
+
 ```sh
 python3 tests/phase2_toolchain_benchmark.py \
   --mode mingw --program build/nexusrev \
