@@ -776,6 +776,11 @@ void recover_functions(AnalysisReport& report, const std::string& requested_pdb_
     std::unordered_map<std::uint32_t, const InstructionRecord*> by_rva;
     by_rva.reserve(report.instructions.size());
     for (const auto& instruction : report.instructions) by_rva.emplace(instruction.rva, &instruction);
+    std::vector<std::uint32_t> decoded_rvas;
+    decoded_rvas.reserve(report.instructions.size());
+    for (const auto& instruction : report.instructions) decoded_rvas.push_back(instruction.rva);
+    std::sort(decoded_rvas.begin(), decoded_rvas.end());
+    decoded_rvas.erase(std::unique(decoded_rvas.begin(), decoded_rvas.end()), decoded_rvas.end());
 
     if (report.symbols.status == "matched") {
         for (const auto& symbol : report.symbols.functions) {
@@ -799,6 +804,9 @@ void recover_functions(AnalysisReport& report, const std::string& requested_pdb_
     for (const auto& item : report.symbols.diagnostics) report.diagnostics.push_back(item);
 
     for (const auto& runtime : report.pe.runtime_functions) {
+        if (runtime.begin_rva >= runtime.end_rva) continue;
+        const auto decoded = std::lower_bound(decoded_rvas.begin(), decoded_rvas.end(), runtime.begin_rva);
+        if (decoded == decoded_rvas.end() || *decoded >= runtime.end_rva) continue;
         if (!is_executable_range(report.pe, runtime.begin_rva, runtime.end_rva)) {
             report.diagnostics.push_back({"UNWIND_FUNCTION_RANGE_INVALID", "warning",
                 "a PE RUNTIME_FUNCTION range was not contained in one file-backed executable section and was ignored"});

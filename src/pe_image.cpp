@@ -501,11 +501,12 @@ void parse_exceptions(PeImage& image) {
                        "x64 exception directory size is not a multiple of RUNTIME_FUNCTION size");
     }
     const std::size_t count = dir->size / 12U;
-    if (count > kMaxMetadataRecords) {
+    if (count > kMaxRuntimeFunctionRecords) {
         add_diagnostic(image, "EXCEPTION_COUNT_LIMIT", "warning",
-                       "runtime-function count exceeds the configured record limit");
+                       "runtime-function count exceeds the dedicated safe record limit");
         return;
     }
+    image.runtime_functions.reserve(count);
     for (std::size_t index = 0; index < count; ++index) {
         const std::uint64_t entry_rva64 = static_cast<std::uint64_t>(dir->rva) + index * 12U;
         if (entry_rva64 > std::numeric_limits<std::uint32_t>::max()) {

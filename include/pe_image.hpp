@@ -12,6 +12,7 @@ constexpr std::uint64_t kMaxInputBytes = 256ULL * 1024ULL * 1024ULL;
 constexpr std::size_t kMaxSections = 96;
 constexpr std::size_t kMaxDataDirectories = 32;
 constexpr std::size_t kMaxMetadataRecords = 1000;
+constexpr std::size_t kMaxRuntimeFunctionRecords = 200000;
 constexpr std::size_t kMaxStringBytes = 4096;
 
 struct PeDiagnostic {

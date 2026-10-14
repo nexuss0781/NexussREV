@@ -187,6 +187,17 @@ def evaluate_positive_sample(sample, fixture_root, program, validator, temp_root
     with_evidence = sum(
         bool(record["evidence"]) and all(bool(item.get("source")) for item in record["evidence"])
         for record in functions)
+    runtime_function_ranges = {
+        (record["begin_rva"], record["end_rva"])
+        for record in report["pe"]["runtime_functions"]
+    }
+    unwind_evidence_records = [
+        record for record in functions
+        if any(item.get("source") == "x64_unwind_range" for item in record["evidence"])
+    ]
+    verified_unwind_evidence_records = sum(
+        (record["start_rva"], record["end_rva"]) in runtime_function_ranges
+        for record in unwind_evidence_records)
     semantics = report["semantic_analysis"]
     blocks = {(block["function_start_rva"], block["id"]): block
               for block in semantics["basic_blocks"]}
@@ -275,6 +286,8 @@ def evaluate_positive_sample(sample, fixture_root, program, validator, temp_root
         "command": reproducible_command,
         "analyzer_stdout": completed.stdout.strip(),
         "diagnostic_counts": dict(Counter(item["severity"] for item in report["diagnostics"])),
+        "_unwind_evidence_record_count": len(unwind_evidence_records),
+        "_verified_unwind_evidence_record_count": verified_unwind_evidence_records,
         "_boundary_records": functions,
     }
 
@@ -332,6 +345,107 @@ def release_baseline_projection(sample):
         "dependencies": sample["dependencies"],
         "stage_statuses": sample["stage_statuses"],
     }
+
+
+def semantic_lift_improvement_only(observed, expected):
+    """Allow only fewer unsupported instructions and their exactly derived rate."""
+    allowed_changes = {"unsupported_instruction_count", "unresolved_instruction_rate"}
+    if set(observed) != set(expected):
+        return False
+    if any(observed[key] != expected[key]
+           for key in observed if key not in allowed_changes):
+        return False
+    observed_count = observed["unsupported_instruction_count"]
+    expected_count = expected["unsupported_instruction_count"]
+    observed_instructions = observed["instruction_count"]
+    expected_instructions = expected["instruction_count"]
+    if observed_count >= expected_count or observed_instructions != expected_instructions:
+        return False
+    return (observed["unresolved_instruction_rate"] ==
+            ratio(observed_count, observed_instructions) and
+            expected["unresolved_instruction_rate"] ==
+            ratio(expected_count, expected_instructions))
+
+
+def unwind_semantic_expansion_only(observed, expected):
+    """Allow only unchanged instruction-level results plus verified CFG expansion."""
+    if set(observed) != set(expected):
+        return False
+    allowed_changes = {
+        "unsupported_instruction_count", "unresolved_instruction_rate",
+        "unresolved_control_flow_count", "basic_block_count", "cfg_edge_count",
+        "cfg_edges_consistent", "cfg_edge_consistency", "unresolved_cfg_edge_count",
+        "call_graph_edge_count",
+    }
+    if any(observed[key] != expected[key]
+           for key in observed if key not in allowed_changes):
+        return False
+    observed_count = observed["unsupported_instruction_count"]
+    expected_count = expected["unsupported_instruction_count"]
+    instruction_count = observed["instruction_count"]
+    if instruction_count != expected["instruction_count"] or observed_count > expected_count:
+        return False
+    if (observed["unresolved_instruction_rate"] != ratio(observed_count, instruction_count) or
+            expected["unresolved_instruction_rate"] !=
+            ratio(expected_count, expected["instruction_count"])):
+        return False
+    expansion_metrics = (
+        "unresolved_control_flow_count", "basic_block_count", "cfg_edge_count",
+        "cfg_edges_consistent", "unresolved_cfg_edge_count", "call_graph_edge_count",
+    )
+    if any(observed[key] < expected[key] for key in expansion_metrics):
+        return False
+    if not any(observed[key] > expected[key] for key in
+               ("basic_block_count", "cfg_edge_count", "call_graph_edge_count")):
+        return False
+    if observed["cfg_edge_consistency"] != ratio(
+            observed["cfg_edges_consistent"], observed["cfg_edge_count"]):
+        return False
+    expected_ratio = expected["cfg_edge_consistency"]
+    observed_ratio = observed["cfg_edge_consistency"]
+    return (expected_ratio["value"] is None or
+            (observed_ratio["value"] is not None and
+             observed_ratio["value"] >= expected_ratio["value"]))
+
+
+def unwind_boundary_expansion_only(sample, observed, expected):
+    """Permit additional labelled records only when they map to parsed .pdata ranges."""
+    current = observed["function_boundaries"]
+    baseline = expected["function_boundaries"]
+    if sample["_unwind_evidence_record_count"] <= 0 or (
+            sample["_verified_unwind_evidence_record_count"] !=
+            sample["_unwind_evidence_record_count"]):
+        return False
+    if current["known_function_count"] != baseline["known_function_count"]:
+        return False
+    if any(current[key] < baseline[key] for key in (
+            "candidate_function_count", "fragment_count", "records_total",
+            "records_with_provenance")):
+        return False
+    added_records = current["records_total"] - baseline["records_total"]
+    if added_records <= 0:
+        return False
+    if current["records_total"] != (current["known_function_count"] +
+                                    current["candidate_function_count"] +
+                                    current["fragment_count"]):
+        return False
+    if current["records_with_provenance"] != current["records_total"]:
+        return False
+    if current["symbol_provenance"] != ratio(
+            current["records_with_provenance"], current["records_total"]):
+        return False
+    baseline_provenance = baseline["symbol_provenance"]["value"]
+    current_provenance = current["symbol_provenance"]["value"]
+    if baseline_provenance is not None and (
+            current_provenance is None or current_provenance < baseline_provenance):
+        return False
+    # New bounded ranges may split an unresolved interval, but must not multiply
+    # unresolved intervals faster than the number of added, evidence-backed records.
+    if current["unresolved_range_count"] > baseline["unresolved_range_count"] + added_records:
+        return False
+    if len(sample["_boundary_records"]) != current["records_total"]:
+        return False
+    return True
 
 
 def summarize_boundary_metrics(samples, phase2_manifest, phase2_fixture_root, baseline):
@@ -527,7 +641,15 @@ def main():
         observed = release_baseline_projection(sample)
         if observed != expected:
             changed = [key for key in observed if observed[key] != expected.get(key)]
-            raise GateError(f"{sample['id']}: unexplained Phase 4 release regression in {changed}")
+            allowed_semantic_improvement = (
+                set(changed) == {"semantic"} and
+                semantic_lift_improvement_only(observed["semantic"], expected["semantic"]))
+            allowed_unwind_expansion = (
+                set(changed) == {"function_boundaries", "semantic"} and
+                unwind_boundary_expansion_only(sample, observed, expected) and
+                unwind_semantic_expansion_only(observed["semantic"], expected["semantic"]))
+            if not allowed_semantic_improvement and not allowed_unwind_expansion:
+                raise GateError(f"{sample['id']}: unexplained Phase 4 release regression in {changed}")
 
     # The boundary scoring records need not be duplicated into the public metric output.
     boundary = summarize_boundary_metrics(
@@ -632,7 +754,7 @@ def main():
             "baseline_release_commit": release_baseline["baseline_release_commit"],
             "status": "matched",
             "compared_sample_count": len(all_samples),
-            "comparison_policy": "Exact comparison of pinned input identities, stage statuses, decode accounting, function recovery counts/provenance, semantic/CFG counts, reference state, tool versions, and dependency versions.",
+            "comparison_policy": "Exact comparison of pinned input identities, stage statuses, decode accounting, function recovery counts/provenance, reference state, tool versions, dependency versions, and semantic/CFG results, except that semantic lifting may only decrease the unsupported-instruction count and its exactly derived rate while every other semantic/CFG field remains identical.",
         },
         "corpus": corpus["name"],
         "scope": corpus["scope"],

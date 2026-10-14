@@ -45,6 +45,34 @@ std::vector<std::uint8_t> minimal_pe() {
     return bytes;
 }
 
+std::vector<std::uint8_t> pe_with_exception_records(std::size_t count) {
+    auto bytes = minimal_pe();
+    constexpr std::size_t optional = 0x98U;
+    constexpr std::size_t section = 0x188U;
+    const auto table_size = static_cast<std::uint32_t>(count * 12U);
+    const std::uint32_t unwind_rva = 0x1000U + table_size;
+    const std::uint32_t needed_size = table_size + 4U;
+    const std::uint32_t section_raw_size = std::max(
+        0x8000U, (needed_size + 0x1ffU) & ~0x1ffU);
+    const std::uint32_t image_size = (0x1000U + section_raw_size + 0xfffU) & ~0xfffU;
+    bytes.resize(0x200U + section_raw_size, 0U);
+    put32(bytes, optional + 56U, image_size);
+    put32(bytes, section + 8U, section_raw_size);
+    put32(bytes, section + 16U, section_raw_size);
+    const std::size_t exception_directory = optional + 112U + 3U * 8U;
+    put32(bytes, exception_directory, 0x1000U);
+    put32(bytes, exception_directory + 4U, table_size);
+    for (std::size_t index = 0; index < count; ++index) {
+        const std::size_t entry = 0x200U + index * 12U;
+        const auto begin_rva = 0x6000U + static_cast<std::uint32_t>(index * 2U);
+        put32(bytes, entry, begin_rva);
+        put32(bytes, entry + 4U, begin_rva + 1U);
+        put32(bytes, entry + 8U, unwind_rva);
+    }
+    bytes[0x200U + table_size] = 1U;
+    return bytes;
+}
+
 bool has(const std::vector<std::string>& values, const std::string& wanted) {
     for (const auto& value : values) if (value == wanted) return true;
     return false;
@@ -97,6 +125,27 @@ bool pe_parser_tests() {
     std::string code, message;
     if (!nexusrev::PeImage::parse(minimal_pe(), image, code, message)) {
         std::cerr << "PE32+ fixture parse failed: " << code << " " << message << '\n'; return false;
+    }
+    if (!nexusrev::PeImage::parse(pe_with_exception_records(nexusrev::kMaxMetadataRecords + 1U),
+                                  image, code, message) ||
+        image.runtime_functions.size() != nexusrev::kMaxMetadataRecords + 1U ||
+        !image.runtime_functions.front().unwind_info_available ||
+        image.runtime_functions.back().begin_rva <= image.runtime_functions.front().begin_rva) {
+        std::cerr << "valid runtime-function tables above the generic metadata cap were rejected\n";
+        return false;
+    }
+    if (!nexusrev::PeImage::parse(
+            pe_with_exception_records(nexusrev::kMaxRuntimeFunctionRecords + 1U), image, code, message) ||
+        !image.runtime_functions.empty() ||
+        std::none_of(image.diagnostics.begin(), image.diagnostics.end(), [](const auto& item) {
+            return item.code == "EXCEPTION_COUNT_LIMIT";
+        })) {
+        std::cerr << "runtime-function record budget did not reject an over-limit table safely\n";
+        return false;
+    }
+    if (!nexusrev::PeImage::parse(minimal_pe(), image, code, message)) {
+        std::cerr << "minimal PE fixture could not be restored after exception-table tests\n";
+        return false;
     }
     std::uint64_t offset = 0;
     std::uint32_t rva = 0;
@@ -173,6 +222,13 @@ bool semantic_operation_tests() {
         if (mnemonic == "call" || mnemonic == "jmp" || mnemonic[0] == 'j') {
             if (mnemonic == "jmp" && insn.rva == 0x1025U) insn.detail_operands = {reg_operand("rax", 1U)};
             else insn.detail_operands = {imm_operand(0x140001100ULL)};
+        } else if (mnemonic == "shl" || mnemonic == "sal" || mnemonic == "shr" || mnemonic == "sar") {
+            auto destination = reg_operand("rax", 3U);
+            auto count = reg_operand("cl", 1U);
+            count.size = 1U;
+            insn.detail_operands = {destination, count};
+            insn.registers_read = {"rax", "cl"};
+            insn.registers_written = {"rax", "rflags"};
         }
         report.instructions.push_back(std::move(insn));
     }
@@ -196,7 +252,7 @@ bool semantic_operation_tests() {
         return nullptr;
     };
     if (report.semantic_analysis.instructions.size() != operations.size() + 3U ||
-        report.semantic_analysis.unsupported_instruction_count != 6U) {
+        report.semantic_analysis.unsupported_instruction_count != 2U) {
         std::cerr << "semantic lifting did not account for all modeled/unsupported instructions\n"; return false;
     }
     const auto add = find_sem(0x1007U);
@@ -208,15 +264,15 @@ bool semantic_operation_tests() {
         std::cerr << "arithmetic/logical flag effects are missing or incorrect\n"; return false;
     }
     bool checked_unsigned = false, checked_signed = false, checked_preserved = false;
-    unsigned int unsupported_shifts = 0U;
+    unsigned int modeled_shifts = 0U;
     for (const auto& sem : report.semantic_analysis.instructions) {
         if (sem.condition == "unsigned_below") checked_unsigned = has(sem.flags_read, "CF");
         if (sem.condition == "signed_less") checked_signed = has(sem.flags_read, "SF") && has(sem.flags_read, "OF");
-        if (sem.rva >= 0x1019U && sem.rva <= 0x101cU && sem.status == "unsupported") ++unsupported_shifts;
+        if (sem.rva >= 0x1019U && sem.rva <= 0x101cU && sem.status == "modeled") ++modeled_shifts;
         if (sem.operation == "copy") checked_preserved = has(sem.flags_preserved, "CF") && has(sem.flags_preserved, "ZF");
     }
-    if (!checked_unsigned || !checked_signed || !checked_preserved || unsupported_shifts != 4U) {
-        std::cerr << "condition-code effects are missing or count-dependent shifts were falsely modeled\n"; return false;
+    if (!checked_unsigned || !checked_signed || !checked_preserved || modeled_shifts != 4U) {
+        std::cerr << "condition-code effects or conservative CL-count shift semantics are missing\n"; return false;
     }
     bool saw_push = false, saw_pop = false, saw_return = false, saw_pushf = false, saw_popf = false;
     bool saw_push16 = false, saw_pop16 = false, saw_direct_call = false, saw_indirect_jump = false;
@@ -240,6 +296,286 @@ bool semantic_operation_tests() {
         no_detail_sem == nullptr || no_detail_sem->unresolved_reason != "decoder_detail_unavailable_control_flow_unknown" ||
         no_detail_sem->control_flow != "unknown") {
         std::cerr << "unsupported instruction or missing-detail diagnostics are not visible\n"; return false;
+    }
+    return true;
+}
+
+bool shift_semantics_tests() {
+    nexusrev::AnalysisReport report;
+    configure_pe(report);
+    const auto append_shift = [&report](std::uint32_t rva, const std::string& mnemonic,
+                                        nexusrev::X86OperandRecord destination,
+                                        nexusrev::X86OperandRecord count) {
+        auto insn = synthetic_instruction(rva, mnemonic);
+        insn.detail_operands = {std::move(destination), std::move(count)};
+        report.instructions.push_back(std::move(insn));
+    };
+    auto rax = reg_operand("rax", 3U);
+    auto one = imm_operand(1U); one.size = 1U;
+    append_shift(0x1000U, "shl", rax, one);
+    auto rax2 = reg_operand("rax", 3U);
+    auto two = imm_operand(2U); two.size = 1U;
+    append_shift(0x1001U, "shr", rax2, two);
+    auto rax3 = reg_operand("rax", 3U);
+    auto cl = reg_operand("cl", 1U); cl.size = 1U;
+    append_shift(0x1002U, "sar", rax3, cl);
+    auto eax = reg_operand("eax", 3U); eax.size = 4U;
+    auto thirty_two = imm_operand(32U); thirty_two.size = 1U;
+    append_shift(0x1003U, "sal", eax, thirty_two);
+    auto ax = reg_operand("ax", 3U); ax.size = 2U;
+    auto seventeen = imm_operand(17U); seventeen.size = 1U;
+    append_shift(0x1004U, "shr", ax, seventeen);
+
+    nexusrev::analyze_semantics(report);
+    const auto find_sem = [&report](std::uint32_t address) -> const nexusrev::SemanticInstructionRecord* {
+        for (const auto& sem : report.semantic_analysis.instructions)
+            if (sem.rva == address) return &sem;
+        return nullptr;
+    };
+    const auto* left_one = find_sem(0x1000U);
+    const auto* right_two = find_sem(0x1001U);
+    const auto* arithmetic_cl = find_sem(0x1002U);
+    const auto* masked_zero = find_sem(0x1003U);
+    const auto* oversized = find_sem(0x1004U);
+    if (left_one == nullptr || left_one->status != "modeled" || left_one->operation != "shl" ||
+        !has(left_one->flags_written, "CF") || !has(left_one->flags_written, "OF") ||
+        !has(left_one->flags_undefined, "AF") ||
+        right_two == nullptr || right_two->status != "modeled" ||
+        !has(right_two->flags_written, "CF") || has(right_two->flags_written, "OF") ||
+        !has(right_two->flags_undefined, "OF") ||
+        arithmetic_cl == nullptr || arithmetic_cl->status != "modeled" ||
+        !has(arithmetic_cl->flags_conditionally_written, "ZF") ||
+        !has(arithmetic_cl->flags_preserved, "ZF") || !has(arithmetic_cl->flags_undefined, "OF") ||
+        masked_zero == nullptr || masked_zero->status != "modeled" || masked_zero->operation != "shl" ||
+        !masked_zero->flags_written.empty() || !has(masked_zero->flags_preserved, "CF") ||
+        oversized == nullptr || oversized->status != "unsupported" ||
+        oversized->unresolved_reason != "shift_count_exceeds_operand_width" ||
+        report.semantic_analysis.unsupported_instruction_count != 1U) {
+        std::cerr << "shift count masking or count-dependent flag effects are inaccurate\n";
+        return false;
+    }
+    return true;
+}
+
+bool trap_semantics_tests() {
+    nexusrev::AnalysisReport report;
+    configure_pe(report);
+    nexusrev::FunctionRecord function;
+    function.entity_kind = "known_function";
+    function.boundary_status = "bounded";
+    function.start_rva = 0x1000U;
+    function.end_rva = 0x1004U;
+    report.function_recovery.known_functions.push_back(function);
+    report.instructions.push_back(synthetic_instruction(0x1000U, "int3", "cc"));
+    report.instructions.push_back(synthetic_instruction(0x1001U, "ud2", "0f 0b"));
+    report.instructions.push_back(synthetic_instruction(0x1003U, "ret", "c3"));
+    nexusrev::analyze_semantics(report);
+    unsigned int modeled_traps = 0U;
+    unsigned int unknown_edges = 0U;
+    for (const auto& sem : report.semantic_analysis.instructions)
+        if (sem.operation == "trap" && sem.status == "modeled" && sem.control_flow == "unknown" &&
+            sem.unresolved_reason == "trap_exception_handler_outside_image") ++modeled_traps;
+    for (const auto& edge : report.semantic_analysis.cfg_edges)
+        if (edge.kind == "unknown" && !edge.to_block && !edge.target_rva) ++unknown_edges;
+    if (modeled_traps != 2U || unknown_edges != 2U ||
+        report.semantic_analysis.functions.empty() ||
+        report.semantic_analysis.functions.front().semantic_complete ||
+        report.semantic_analysis.unresolved_control_flow_count != 1U) {
+        std::cerr << "trap instructions were treated as fallthrough or assigned an invented handler\n";
+        return false;
+    }
+    return true;
+}
+
+bool bit_operation_tests() {
+    nexusrev::AnalysisReport report;
+    configure_pe(report);
+    const auto append = [&report](std::uint32_t rva, const std::string& mnemonic,
+                                  std::vector<nexusrev::X86OperandRecord> operands) {
+        auto insn = synthetic_instruction(rva, mnemonic);
+        insn.detail_operands = std::move(operands);
+        report.instructions.push_back(std::move(insn));
+    };
+    append(0x1000U, "bt", {reg_operand("rax", 1U), reg_operand("rcx", 1U)});
+    auto eax = reg_operand("eax", 3U); eax.size = 4U;
+    auto bit_three = imm_operand(3U); bit_three.size = 1U;
+    append(0x1001U, "bts", {eax, bit_three});
+    append(0x1002U, "btr", {reg_operand("rax", 3U), bit_three});
+    append(0x1003U, "btc", {reg_operand("rax", 3U), reg_operand("rcx", 1U)});
+    append(0x1004U, "bsf", {reg_operand("rdx", 2U), reg_operand("rax", 1U)});
+    append(0x1005U, "bsr", {reg_operand("r8", 2U), reg_operand("r9", 1U)});
+    append(0x1006U, "bt", {memory_operand("rax", 0, 8U, 3U), reg_operand("rcx", 1U)});
+
+    nexusrev::analyze_semantics(report);
+    const auto find_sem = [&report](std::uint32_t address) -> const nexusrev::SemanticInstructionRecord* {
+        for (const auto& sem : report.semantic_analysis.instructions)
+            if (sem.rva == address) return &sem;
+        return nullptr;
+    };
+    const auto* bt = find_sem(0x1000U);
+    const auto* bts = find_sem(0x1001U);
+    const auto* btr = find_sem(0x1002U);
+    const auto* btc = find_sem(0x1003U);
+    const auto* bsf = find_sem(0x1004U);
+    const auto* bsr = find_sem(0x1005U);
+    const auto* memory_bt = find_sem(0x1006U);
+    if (bt == nullptr || bt->status != "modeled" || bt->operation != "bit_test" ||
+        !has(bt->flags_written, "CF") || !has(bt->flags_undefined, "ZF") ||
+        bts == nullptr || bts->status != "modeled" || bts->operation != "bit_test_set" ||
+        btr == nullptr || btr->status != "modeled" || btr->operation != "bit_test_reset" ||
+        btc == nullptr || btc->status != "modeled" || btc->operation != "bit_test_complement" ||
+        bsf == nullptr || bsf->status != "modeled" || bsf->operation != "bit_scan_forward" ||
+        !has(bsf->flags_written, "ZF") || !has(bsf->flags_undefined, "CF") ||
+        bsf->unresolved_reason != "bit_scan_destination_undefined_for_zero_source" ||
+        bsr == nullptr || bsr->status != "modeled" || bsr->operation != "bit_scan_reverse" ||
+        memory_bt == nullptr || memory_bt->status != "unsupported" ||
+        memory_bt->unresolved_reason != "memory_bit_operation_not_supported" ||
+        report.semantic_analysis.unsupported_instruction_count != 1U) {
+        std::cerr << "bit-test/scan semantics or conservative memory addressing limits are incorrect\n";
+        return false;
+    }
+    return true;
+}
+
+bool legacy_simd_semantics_tests() {
+    nexusrev::AnalysisReport report;
+    configure_pe(report);
+    const auto append = [&report](std::uint32_t rva, const std::string& mnemonic,
+                                  std::vector<nexusrev::X86OperandRecord> operands) {
+        auto insn = synthetic_instruction(rva, mnemonic);
+        insn.detail_operands = std::move(operands);
+        report.instructions.push_back(std::move(insn));
+    };
+    auto xmm0_write = reg_operand("xmm0", 2U); xmm0_write.size = 16U;
+    auto xmm1_read = reg_operand("xmm1", 1U); xmm1_read.size = 16U;
+    append(0x1000U, "movups", {xmm0_write, xmm1_read});
+    auto xmm2_write = reg_operand("xmm2", 2U); xmm2_write.size = 16U;
+    append(0x1001U, "movups", {xmm2_write, memory_operand("rax", 0, 16U, 1U)});
+    auto xmm3_read = reg_operand("xmm3", 1U); xmm3_read.size = 16U;
+    append(0x1002U, "movups", {memory_operand("rax", 0, 16U, 2U), xmm3_read});
+    auto xmm4_rw = reg_operand("xmm4", 3U); xmm4_rw.size = 16U;
+    append(0x1003U, "xorps", {xmm4_rw, memory_operand("rcx", 8, 16U, 1U)});
+    auto ymm0 = reg_operand("ymm0", 3U); ymm0.size = 32U;
+    auto ymm1 = reg_operand("ymm1", 1U); ymm1.size = 32U;
+    append(0x1004U, "xorps", {ymm0, ymm1});
+
+    nexusrev::analyze_semantics(report);
+    const auto find_sem = [&report](std::uint32_t address) -> const nexusrev::SemanticInstructionRecord* {
+        for (const auto& sem : report.semantic_analysis.instructions)
+            if (sem.rva == address) return &sem;
+        return nullptr;
+    };
+    const auto* register_move = find_sem(0x1000U);
+    const auto* load_move = find_sem(0x1001U);
+    const auto* store_move = find_sem(0x1002U);
+    const auto* xor_memory = find_sem(0x1003U);
+    const auto* rejected_wide_xor = find_sem(0x1004U);
+    if (register_move == nullptr || register_move->status != "modeled" ||
+        register_move->operation != "vector_move_128" ||
+        load_move == nullptr || load_move->status != "modeled" ||
+        load_move->operation != "vector_move_128" || !load_move->memory_read || load_move->memory_written ||
+        store_move == nullptr || store_move->status != "modeled" ||
+        store_move->operation != "vector_move_128" || store_move->memory_read || !store_move->memory_written ||
+        xor_memory == nullptr || xor_memory->status != "modeled" ||
+        xor_memory->operation != "vector_xor_128" || !xor_memory->memory_read || xor_memory->memory_written ||
+        !xor_memory->flags_written.empty() || !xor_memory->flags_undefined.empty() ||
+        !has(xor_memory->flags_preserved, "CF") ||
+        rejected_wide_xor == nullptr || rejected_wide_xor->status != "unsupported" ||
+        rejected_wide_xor->unresolved_reason != "legacy_simd_operand_width_not_128_bits" ||
+        report.semantic_analysis.modeled_instruction_count != 4U ||
+        report.semantic_analysis.unsupported_instruction_count != 1U) {
+        std::cerr << "legacy 128-bit SIMD semantics or conservative width rejection is incorrect\n";
+        return false;
+    }
+    return true;
+}
+
+bool legacy_movq_semantics_tests() {
+    nexusrev::AnalysisReport report;
+    configure_pe(report);
+    const auto append = [&report](std::uint32_t rva, std::uint8_t opcode, std::uint8_t prefix,
+                                  std::uint8_t rex, std::vector<nexusrev::X86OperandRecord> operands) {
+        auto insn = synthetic_instruction(rva, "movq");
+        insn.opcodes = {0x0fU, opcode, 0U, 0U};
+        insn.prefixes[2] = prefix;
+        insn.rex = rex;
+        insn.detail_operands = std::move(operands);
+        report.instructions.push_back(std::move(insn));
+    };
+    auto xmm0_write = reg_operand("xmm0", 2U); xmm0_write.size = 16U;
+    auto rcx_read = reg_operand("rcx", 1U);
+    append(0x1000U, 0x6eU, 0x66U, 0x48U, {xmm0_write, rcx_read});
+    auto xmm1_write = reg_operand("xmm1", 2U); xmm1_write.size = 16U;
+    append(0x1001U, 0x6eU, 0x66U, 0x48U,
+           {xmm1_write, memory_operand("rax", 8, 8U, 1U)});
+    auto xmm2_write = reg_operand("xmm2", 2U); xmm2_write.size = 16U;
+    auto xmm3_read = reg_operand("xmm3", 1U); xmm3_read.size = 16U;
+    append(0x1002U, 0xd6U, 0x66U, 0x40U, {xmm2_write, xmm3_read});
+    auto xmm15_read = reg_operand("xmm15", 1U); xmm15_read.size = 16U;
+    append(0x1003U, 0xd6U, 0x66U, 0x44U,
+           {memory_operand("rsp", 0x45, 8U, 1U), xmm15_read});
+    auto r10_write = reg_operand("r10", 2U);
+    auto xmm4_read = reg_operand("xmm4", 1U); xmm4_read.size = 16U;
+    append(0x1004U, 0x7eU, 0x66U, 0x49U, {r10_write, xmm4_read});
+    auto xmm5_write = reg_operand("xmm5", 2U); xmm5_write.size = 16U;
+    auto xmm6_read = reg_operand("xmm6", 1U); xmm6_read.size = 16U;
+    append(0x1005U, 0x7eU, 0xf3U, 0U, {xmm5_write, xmm6_read});
+    auto xmm7_write = reg_operand("xmm7", 2U); xmm7_write.size = 16U;
+    append(0x1006U, 0x7eU, 0xf3U, 0U,
+           {xmm7_write, memory_operand("rdx", 0, 8U, 1U)});
+    auto ymm0_write = reg_operand("ymm0", 2U); ymm0_write.size = 32U;
+    auto xmm8_read = reg_operand("xmm8", 1U); xmm8_read.size = 16U;
+    append(0x1007U, 0xd6U, 0x66U, 0U, {ymm0_write, xmm8_read});
+    auto xmm9_write = reg_operand("xmm9", 2U); xmm9_write.size = 16U;
+    append(0x1008U, 0x6eU, 0x66U, 0U, {xmm9_write, reg_operand("rax", 1U)});
+    auto r11_write = reg_operand("r11", 2U);
+    auto xmm10_read = reg_operand("xmm10", 1U); xmm10_read.size = 16U;
+    append(0x1009U, 0x7eU, 0x66U, 0U, {r11_write, xmm10_read});
+
+    nexusrev::analyze_semantics(report);
+    const auto find_sem = [&report](std::uint32_t address) -> const nexusrev::SemanticInstructionRecord* {
+        for (const auto& sem : report.semantic_analysis.instructions)
+            if (sem.rva == address) return &sem;
+        return nullptr;
+    };
+    const auto* gpr_to_xmm = find_sem(0x1000U);
+    const auto* memory_to_xmm = find_sem(0x1001U);
+    const auto* xmm_to_xmm = find_sem(0x1002U);
+    const auto* xmm_to_memory = find_sem(0x1003U);
+    const auto* xmm_to_gpr = find_sem(0x1004U);
+    const auto* f3_xmm_move = find_sem(0x1005U);
+    const auto* f3_memory_load = find_sem(0x1006U);
+    const auto* bad_width = find_sem(0x1007U);
+    const auto* missing_rex_w_load = find_sem(0x1008U);
+    const auto* missing_rex_w_store = find_sem(0x1009U);
+    if (gpr_to_xmm == nullptr || gpr_to_xmm->status != "modeled" ||
+        gpr_to_xmm->operation != "vector_move_low_64_to_xmm_zero_upper" ||
+        !has(gpr_to_xmm->registers_read, "rcx") || !has(gpr_to_xmm->registers_written, "xmm0") ||
+        has(gpr_to_xmm->registers_read, "xmm0") || !gpr_to_xmm->flags_written.empty() ||
+        !has(gpr_to_xmm->flags_preserved, "CF") || !has(gpr_to_xmm->flags_preserved, "ZF") ||
+        memory_to_xmm == nullptr || memory_to_xmm->status != "modeled" ||
+        !memory_to_xmm->memory_read || memory_to_xmm->memory_written ||
+        xmm_to_xmm == nullptr || xmm_to_xmm->status != "modeled" ||
+        xmm_to_xmm->operation != "vector_move_low_64_to_xmm_zero_upper" ||
+        !has(xmm_to_xmm->registers_read, "xmm3") || !has(xmm_to_xmm->registers_written, "xmm2") ||
+        has(xmm_to_xmm->registers_read, "xmm2") ||
+        xmm_to_memory == nullptr || xmm_to_memory->status != "modeled" ||
+        xmm_to_memory->operation != "vector_move_low_64_from_xmm" ||
+        xmm_to_memory->memory_read || !xmm_to_memory->memory_written ||
+        !has(xmm_to_memory->registers_read, "xmm15") || !has(xmm_to_memory->registers_read, "rsp") ||
+        xmm_to_gpr == nullptr || xmm_to_gpr->status != "modeled" ||
+        xmm_to_gpr->operation != "vector_move_low_64_from_xmm" ||
+        !has(xmm_to_gpr->registers_written, "r10") || !has(xmm_to_gpr->registers_read, "xmm4") ||
+        f3_xmm_move == nullptr || f3_xmm_move->status != "modeled" ||
+        f3_xmm_move->operation != "vector_move_low_64_to_xmm_zero_upper" ||
+        f3_memory_load == nullptr || f3_memory_load->status != "modeled" || !f3_memory_load->memory_read ||
+        bad_width == nullptr || bad_width->status != "unsupported" ||
+        missing_rex_w_load == nullptr || missing_rex_w_load->status != "unsupported" ||
+        missing_rex_w_store == nullptr || missing_rex_w_store->status != "unsupported" ||
+        report.semantic_analysis.modeled_instruction_count != 7U ||
+        report.semantic_analysis.unsupported_instruction_count != 3U) {
+        std::cerr << "legacy MOVQ width, upper-XMM, register, or memory semantics are inaccurate\n";
+        return false;
     }
     return true;
 }
@@ -603,7 +939,10 @@ int main() {
         std::cerr << "SHA-256 abc test failed\n";
         return 1;
     }
-    if (!pe_parser_tests() || !semantic_operation_tests() || !cfg_and_reference_tests() ||
+    if (!pe_parser_tests() || !semantic_operation_tests() || !shift_semantics_tests() ||
+        !trap_semantics_tests() || !bit_operation_tests() || !legacy_simd_semantics_tests() ||
+        !legacy_movq_semantics_tests() ||
+        !cfg_and_reference_tests() ||
         !phase4_stack_and_signature_tests() || !phase4_import_dataflow_tests() ||
         !phase4_callee_type_propagation_tests() || !phase4_rtti_vtable_tests()) return 1;
     if (!stop_control_tests()) return 1;

@@ -182,6 +182,16 @@ A phase is complete only when its exit gate is satisfied in CI and its artifacts
 
 **Phase 6 implementation status (2026-10-15): IMPLEMENTED; local gates pass, hosted Gate 6 pending.** The Linux sanitizer-enabled build passes all six CTest gates, including the frozen Phase 5 corpus baseline. The fixed-seed Clang libFuzzer+ASan+UBSan smoke completed 2,000 runs with no crash or sanitizer finding. The Linux CPack archive extracted and ran `--version`/`--help`; all 11 resolved vcpkg copyright notices matched the installed tree byte-for-byte. The CycloneDX 1.6 SBOM validator verified all 11 installed package versions, license declarations, encoded PURLs and dependency references. Hosted Linux/Windows CI remains required to validate the final release candidate and Windows package/DLL path. No Antigravity installer or checked-in sample was executed. See [`docs/phase6-validation.md`](docs/phase6-validation.md) and [`docs/phase6-release-notes.md`](docs/phase6-release-notes.md).
 
+### Phase 7 — Unwind-driven coverage for large native engines
+
+**Focus:** improve the static-analysis engine's use of PE exception metadata and its bounded coverage. This phase does not target the IDE/UI and does not claim exact-source recovery.
+
+**Phase 7 status (2026-10-15): IN PROGRESS; first parser/recovery milestone locally verified.** AMD64 runtime-function tables now have a dedicated 200,000-record cap; synthetic tests accept 1,001 valid entries and reject declarations above the safe cap. On the inert Antigravity `language_server.exe` sample, NexussREV parsed 142,182 valid unwind entries; 137 overlap the current decoded slice and are admitted as exact, provenance-labelled candidates. Recovery reports 229 candidates, 0 known functions, and no matching PDB. The 20,000-instruction limit still covers only 67,394 of 50,134,887 executable file-backed bytes (0.134425%); its JSON report is already 57.76 MiB of the 64 MiB output ceiling. The report remains partial and every installer/application binary remains unexecuted. See [`docs/antigravity-engine-static-analysis.md`](docs/antigravity-engine-static-analysis.md) and [`docs/phase5-validation.md`](docs/phase5-validation.md).
+
+**Static-engine semantic milestone (2026-10-15):** the bounded Antigravity slice contains 113 `MOVQ` instructions; all 113 now have exact legacy SSE2 semantics, reducing unsupported instructions from 395 to 282 without changing decode coverage, the 54 unresolved flow issues, or candidate/known-function counts. The updated report validates against schema v6 and remains below the 64 MiB limit. The installer and extracted engine remain unexecuted; this does not claim complete decompilation. See the Phase 10 entry in [`docs/antigravity-engine-static-analysis.md`](docs/antigravity-engine-static-analysis.md).
+
+**Next Phase 7 gates:** (1) compact or stream report serialization before raising limits; (2) replace first-N linear decoding with deterministic, per-section/function worklists seeded by validated ranges while preserving decode accounting and explicit gaps; (3) continue measured SIMD semantics beyond the bounded MOVQ slice with focused regression/reference tests; and (4) keep unresolved control flow, absent symbols, and partial coverage visible.
+
 ## 5. Library and tool selection
 
 | Tool | Recommended role | Important boundary |

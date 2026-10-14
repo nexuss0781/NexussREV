@@ -111,6 +111,189 @@ bool is_cmov_or_set(const std::string& mnemonic) {
     return mnemonic.rfind("cmov", 0U) == 0U || mnemonic.rfind("set", 0U) == 0U;
 }
 
+bool is_shift_instruction(const std::string& mnemonic) {
+    return is_one_of(mnemonic, {"shl", "sal", "shr", "sar"});
+}
+
+bool is_trap_instruction(const std::string& mnemonic) {
+    return is_one_of(mnemonic, {"int3", "ud2", "ud2b", "icebp", "int1"});
+}
+
+bool is_bit_test_instruction(const std::string& mnemonic) {
+    return is_one_of(mnemonic, {"bt", "bts", "btr", "btc"});
+}
+
+bool is_bit_scan_instruction(const std::string& mnemonic) {
+    return mnemonic == "bsf" || mnemonic == "bsr";
+}
+
+bool is_legacy_simd_instruction(const std::string& mnemonic) {
+    return mnemonic == "movups" || mnemonic == "xorps";
+}
+
+bool is_xmm_register(const X86OperandRecord& operand) {
+    return operand.type == "register" && operand.reg.rfind("xmm", 0U) == 0U;
+}
+
+bool has_prefix(const InstructionRecord& insn, std::uint8_t prefix) {
+    return std::find(insn.prefixes.begin(), insn.prefixes.end(), prefix) != insn.prefixes.end();
+}
+
+bool prepare_legacy_simd_operands(const std::string& mnemonic, const InstructionRecord& insn,
+                                  std::string& reason) {
+    if (insn.detail_operands.size() != 2U) {
+        reason = "legacy_simd_operand_count_not_supported";
+        return false;
+    }
+    const auto& destination = insn.detail_operands[0];
+    const auto& source = insn.detail_operands[1];
+    if (destination.size != 16U || source.size != 16U) {
+        reason = "legacy_simd_operand_width_not_128_bits";
+        return false;
+    }
+    if (mnemonic == "xorps") {
+        if (!is_xmm_register(destination) ||
+            (!is_xmm_register(source) && source.type != "memory")) {
+            reason = "xorps_requires_xmm_destination_and_xmm_or_memory_source";
+            return false;
+        }
+        return true;
+    }
+    if ((destination.type != "memory" && !is_xmm_register(destination)) ||
+        (source.type != "memory" && !is_xmm_register(source)) ||
+        (destination.type == "memory" && source.type != "register")) {
+        reason = "movups_requires_xmm_and_memory_operands";
+        return false;
+    }
+    return true;
+}
+
+bool prepare_legacy_movq_operands(const InstructionRecord& insn, std::string& operation,
+                                 std::string& reason) {
+    if (insn.detail_operands.size() != 2U) {
+        reason = "movq_operand_count_not_supported";
+        return false;
+    }
+    if (insn.opcodes[0] != 0x0fU) {
+        reason = "movq_opcode_form_not_supported";
+        return false;
+    }
+    const auto& destination = insn.detail_operands[0];
+    const auto& source = insn.detail_operands[1];
+    const bool prefix_66 = has_prefix(insn, 0x66U);
+    const bool prefix_f3 = has_prefix(insn, 0xf3U);
+    const bool rex_w = (insn.rex & 0x08U) != 0U;
+    const auto xmm128 = [](const X86OperandRecord& operand) {
+        return is_xmm_register(operand) && operand.size == 16U;
+    };
+    const auto gpr64 = [](const X86OperandRecord& operand) {
+        return operand.type == "register" && operand.size == 8U &&
+            is_one_of(operand.reg, {"rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
+                                    "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"});
+    };
+    const auto memory64 = [](const X86OperandRecord& operand) {
+        return operand.type == "memory" && operand.size == 8U;
+    };
+    if (insn.opcodes[1] == 0x6eU && prefix_66 && !prefix_f3 && rex_w &&
+        xmm128(destination) && (gpr64(source) || memory64(source))) {
+        operation = "vector_move_low_64_to_xmm_zero_upper";
+        return true;
+    }
+    if (insn.opcodes[1] == 0x7eU && prefix_f3 && !prefix_66 && !rex_w &&
+        xmm128(destination) && (xmm128(source) || memory64(source))) {
+        operation = "vector_move_low_64_to_xmm_zero_upper";
+        return true;
+    }
+    if (insn.opcodes[1] == 0x7eU && prefix_66 && !prefix_f3 && rex_w &&
+        (gpr64(destination) || memory64(destination)) && xmm128(source)) {
+        operation = "vector_move_low_64_from_xmm";
+        return true;
+    }
+    if (insn.opcodes[1] == 0xd6U && prefix_66 && !prefix_f3 && !rex_w &&
+        (xmm128(destination) || memory64(destination)) && xmm128(source)) {
+        operation = xmm128(destination) ? "vector_move_low_64_to_xmm_zero_upper" :
+                                         "vector_move_low_64_from_xmm";
+        return true;
+    }
+    reason = "movq_encoding_or_operand_form_not_supported";
+    return false;
+}
+
+bool prepare_bit_operands(const std::string& mnemonic, const InstructionRecord& insn,
+                          std::string& reason) {
+    if (insn.detail_operands.size() != 2U) {
+        reason = "bit_operation_operand_count_not_supported";
+        return false;
+    }
+    const auto& destination = insn.detail_operands[0];
+    const auto& source = insn.detail_operands[1];
+    if (destination.type != "register") {
+        reason = "memory_bit_operation_not_supported";
+        return false;
+    }
+    const unsigned int width = static_cast<unsigned int>(destination.size) * 8U;
+    if (is_bit_test_instruction(mnemonic)) {
+        if (width != 8U && width != 16U && width != 32U && width != 64U) {
+            reason = "bit_test_operand_width_not_supported";
+            return false;
+        }
+        if (source.type == "register" && source.size == destination.size) return true;
+        if (source.type == "immediate" && source.size == 1U) return true;
+        reason = "bit_test_index_operand_not_supported";
+        return false;
+    }
+    if ((width == 16U || width == 32U || width == 64U) &&
+        source.size == destination.size &&
+        (source.type == "register" || source.type == "memory")) return true;
+    reason = "bit_scan_operands_not_supported";
+    return false;
+}
+
+bool prepare_shift_operands(const InstructionRecord& insn,
+                            std::optional<unsigned int>& shift_count,
+                            std::string& reason) {
+    if (insn.detail_operands.size() != 2U) {
+        reason = "shift_operand_count_not_supported";
+        return false;
+    }
+    const auto& destination = insn.detail_operands[0];
+    const auto& count = insn.detail_operands[1];
+    if (destination.type != "register" && destination.type != "memory") {
+        reason = "shift_destination_not_supported";
+        return false;
+    }
+    const unsigned int width = static_cast<unsigned int>(destination.size) * 8U;
+    if (width != 8U && width != 16U && width != 32U && width != 64U) {
+        reason = "shift_operand_width_not_supported";
+        return false;
+    }
+    if (count.type == "immediate") {
+        if (count.immediate < 0 || count.immediate > 255) {
+            reason = "shift_immediate_count_out_of_range";
+            return false;
+        }
+        const unsigned int mask = width == 64U ? 0x3fU : 0x1fU;
+        shift_count = static_cast<unsigned int>(count.immediate) & mask;
+        if (*shift_count > width) {
+            reason = "shift_count_exceeds_operand_width";
+            return false;
+        }
+        return true;
+    }
+    if (count.type == "register" && count.reg == "cl") {
+        // The masked CL count is always below the width for 32-/64-bit operands.
+        // For byte/word shifts it may exceed the operand width, whose result is undefined.
+        if (width < 32U) {
+            reason = "dynamic_shift_count_may_exceed_operand_width";
+            return false;
+        }
+        shift_count.reset();
+        return true;
+    }
+    reason = "shift_count_source_not_supported";
+    return false;
+}
+
 std::optional<std::uint32_t> direct_target(const PeImage& pe, const InstructionRecord& insn) {
     for (const auto& operand : insn.detail_operands) {
         if (operand.type != "immediate" || operand.immediate < 0) continue;
@@ -164,7 +347,8 @@ void derive_operand_effects(SemanticInstructionRecord& sem, const std::string& m
             continue;
         }
         if (op.type != "memory") continue;
-        const bool move_or_lea = is_one_of(mnemonic, {"mov", "movabs", "movzx", "movsx", "movsxd", "lea"});
+        const bool vector_move = mnemonic == "movups";
+        const bool move_or_lea = is_one_of(mnemonic, {"mov", "movabs", "movzx", "movsx", "movsxd", "lea"}) || vector_move;
         const bool compare = is_one_of(mnemonic, {"cmp", "test"});
         const bool stack_pop = mnemonic == "pop" || mnemonic == "popq";
         const bool stack_push = mnemonic == "push" || mnemonic == "pushq" || mnemonic == "pushfq";
@@ -172,6 +356,10 @@ void derive_operand_effects(SemanticInstructionRecord& sem, const std::string& m
             (!move_or_lea && !stack_pop && index == 0U)) sem.memory_read = true;
         if (has_operand_access(op, 2U) || (!op.access && stack_pop) ||
             (!move_or_lea && !compare && !stack_push && !stack_pop && index == 0U)) sem.memory_written = true;
+        if (vector_move) {
+            if (index == 0U) sem.memory_written = true;
+            else sem.memory_read = true;
+        }
         add_unique(sem.registers_read, op.base);
         add_unique(sem.registers_read, op.index);
         add_unique(sem.registers_read, op.segment);
@@ -198,6 +386,18 @@ SemanticInstructionRecord lift_one(const PeImage& pe, const InstructionRecord& i
     const bool return_instruction = is_one_of(m, {"ret", "retq", "retn"});
     const bool push = is_one_of(m, {"push", "pushq", "pushfq"});
     const bool pop = is_one_of(m, {"pop", "popq", "popfq"});
+    const bool shift = is_shift_instruction(m);
+    const bool trap = is_trap_instruction(m);
+    const bool bit_test = is_bit_test_instruction(m);
+    const bool bit_scan = is_bit_scan_instruction(m);
+    const bool legacy_simd = is_legacy_simd_instruction(m);
+    const bool legacy_movq = m == "movq";
+    std::string movq_operation;
+    std::optional<unsigned int> shift_count;
+    if (shift && !prepare_shift_operands(insn, shift_count, sem.unresolved_reason)) return sem;
+    if ((bit_test || bit_scan) && !prepare_bit_operands(m, insn, sem.unresolved_reason)) return sem;
+    if (legacy_simd && !prepare_legacy_simd_operands(m, insn, sem.unresolved_reason)) return sem;
+    if (legacy_movq && !prepare_legacy_movq_operands(insn, movq_operation, sem.unresolved_reason)) return sem;
 
     if ((m == "leave" && has_operand_size_override(insn)) ||
         ((m == "pushfq" || m == "popfq") && has_operand_size_override(insn))) {
@@ -220,6 +420,20 @@ SemanticInstructionRecord lift_one(const PeImage& pe, const InstructionRecord& i
     else if (m == "cmp" || m == "test") sem.operation = m;
     else if (m == "imul" || m == "mul" || m == "div" || m == "idiv") sem.operation = m;
     else if (m == "xchg") sem.operation = "exchange";
+    else if (m == "movups") sem.operation = "vector_move_128";
+    else if (m == "xorps") sem.operation = "vector_xor_128";
+    else if (legacy_movq) sem.operation = movq_operation;
+    else if (shift) sem.operation = m == "sal" ? "shl" : m;
+    else if (trap) sem.operation = "trap";
+    else if (bit_test) {
+        if (m == "bt") sem.operation = "bit_test";
+        else if (m == "bts") sem.operation = "bit_test_set";
+        else if (m == "btr") sem.operation = "bit_test_reset";
+        else sem.operation = "bit_test_complement";
+    } else if (bit_scan) {
+        sem.operation = m == "bsf" ? "bit_scan_forward" : "bit_scan_reverse";
+        sem.unresolved_reason = "bit_scan_destination_undefined_for_zero_source";
+    }
     else if (push) sem.operation = "push";
     else if (pop) sem.operation = "pop";
     else if (m == "leave") sem.operation = "leave";
@@ -245,6 +459,28 @@ SemanticInstructionRecord lift_one(const PeImage& pe, const InstructionRecord& i
 
     sem.status = "modeled";
     derive_operand_effects(sem, m);
+    if (legacy_movq) {
+        const auto& destination = sem.operands[0];
+        const auto& source = sem.operands[1];
+        sem.memory_read = source.type == "memory";
+        sem.memory_written = destination.type == "memory";
+        for (std::size_t index = 0; index < sem.operands.size(); ++index) {
+            const auto& operand = sem.operands[index];
+            if (operand.type != "register") continue;
+            if (index == 0U) {
+                add_unique(sem.registers_written, operand.reg);
+                const bool also_source = std::any_of(sem.operands.begin() + 1, sem.operands.end(),
+                    [&operand](const X86OperandRecord& item) {
+                        return item.type == "register" && item.reg == operand.reg;
+                    });
+                if (!also_source)
+                    sem.registers_read.erase(std::remove(sem.registers_read.begin(), sem.registers_read.end(),
+                                                         operand.reg), sem.registers_read.end());
+            } else {
+                add_unique(sem.registers_read, operand.reg);
+            }
+        }
+    }
     if (sem.operation == "add" || sem.operation == "sub" || sem.operation == "adc" ||
         sem.operation == "sbb" || sem.operation == "cmp" || sem.operation == "neg") {
         if (m == "adc" || m == "sbb") add_unique(sem.flags_read, "CF");
@@ -255,6 +491,32 @@ SemanticInstructionRecord lift_one(const PeImage& pe, const InstructionRecord& i
         flag_writes_logical(sem);
     } else if (m == "not") {
         for (const auto* flag : {"CF", "PF", "AF", "ZF", "SF", "OF"}) add_unique(sem.flags_preserved, flag);
+    } else if (shift) {
+        if (shift_count) {
+            if (*shift_count != 0U) {
+                for (const auto* flag : {"CF", "PF", "ZF", "SF"}) add_unique(sem.flags_written, flag);
+                add_unique(sem.flags_undefined, "AF");
+                if (*shift_count == 1U) add_unique(sem.flags_written, "OF");
+                else add_unique(sem.flags_undefined, "OF");
+            }
+        } else {
+            // A CL count of zero preserves flags; nonzero counts update them, and OF/AF
+            // can be undefined. Record both possibilities rather than inventing a value.
+            for (const auto* flag : {"CF", "PF", "ZF", "SF", "OF"})
+                add_unique(sem.flags_conditionally_written, flag);
+            for (const auto* flag : {"CF", "PF", "AF", "ZF", "SF", "OF"})
+                add_unique(sem.flags_preserved, flag);
+            add_unique(sem.flags_undefined, "AF");
+            add_unique(sem.flags_undefined, "OF");
+        }
+    } else if (bit_test) {
+        add_unique(sem.flags_written, "CF");
+        for (const auto* flag : {"PF", "AF", "ZF", "SF", "OF"})
+            add_unique(sem.flags_undefined, flag);
+    } else if (bit_scan) {
+        add_unique(sem.flags_written, "ZF");
+        for (const auto* flag : {"CF", "PF", "AF", "SF", "OF"})
+            add_unique(sem.flags_undefined, flag);
     } else if (m == "imul" || m == "mul") {
         add_unique(sem.flags_written, "CF"); add_unique(sem.flags_written, "OF");
         for (const auto* flag : {"PF", "AF", "ZF", "SF"}) add_unique(sem.flags_undefined, flag);
@@ -344,6 +606,9 @@ SemanticInstructionRecord lift_one(const PeImage& pe, const InstructionRecord& i
             "direct_call_target_outside_image" : "indirect_call_destination_unknown";
     } else if (return_instruction) {
         sem.control_flow = "return";
+    } else if (trap) {
+        sem.control_flow = "unknown";
+        sem.unresolved_reason = "trap_exception_handler_outside_image";
     } else {
         sem.control_flow = "fallthrough";
     }
