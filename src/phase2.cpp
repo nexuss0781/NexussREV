@@ -212,11 +212,12 @@ private:
         const std::size_t end = begin + substream_size;
         std::size_t cursor = begin;
         while (cursor < end) {
-            if (end - cursor < 60U) { error = "truncated PDB DBI module descriptor"; return false; }
+            if (end - cursor < 64U) { error = "truncated PDB DBI module descriptor"; return false; }
             PdbModule module;
             (void)read_u16(dbi, cursor + 34U, module.stream_index);
             (void)read_u32(dbi, cursor + 36U, module.symbol_bytes);
-            std::size_t strings = cursor + 60U;
+            // The 64-byte ModInfo prefix includes PdbFilePathNameIndex at +60.
+            const std::size_t strings = cursor + 64U;
             const auto first_end = std::find(dbi.begin() + static_cast<std::ptrdiff_t>(strings),
                                              dbi.begin() + static_cast<std::ptrdiff_t>(end), 0U);
             if (first_end == dbi.begin() + static_cast<std::ptrdiff_t>(end)) {
