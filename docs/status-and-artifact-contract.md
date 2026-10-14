@@ -56,6 +56,14 @@ For executable file-backed bytes, the report distinguishes processed, decoded, u
 - Pseudocode retains instruction RVA comments and unknown/unsupported operations. It is a review aid, not original source, not guaranteed compilable, and not an equivalence claim.
 - Gate 4 metrics use the hash-identified fixtures in [`phase4-ground-truth.json`](../tests/benchmarks/v1/phase4-ground-truth.json). `tests/phase4_benchmark.py` reports signature-location and type precision/recall; unknown types are false negatives. The O2 fixture is held out for expected-calibration-error scoring. CTest writes `build/phase4-benchmark-results.json`, uploaded by CI. Fixtures are parsed as data and never executed.
 
+## Validation and quality reporting (Phase 5)
+
+- `tests/phase5_validation.py` consumes the hash-pinned [`phase5-corpus.json`](../tests/benchmarks/v1/phase5-corpus.json), reuses Gate 2 boundary truths and the Gate 4 signature/type result, and validates each report against this schema. It emits `build/phase5-validation-results.json`; CI retains the file as a build artifact.
+- Metrics are corpus-scoped and include parse-outcome conformance, executable-file-backed decode coverage, exact labelled boundary precision/recall, CFG edge consistency, unsupported/unresolved instructions and edges, recovered-function provenance, signature/type accuracy and calibration, Ghidra difference count, and output completeness. Their exact definitions, denominators, gates, and unknown-state policies are in [`phase5-validation.md`](phase5-validation.md).
+- Each valid sample is also compared against the exact stable-invariant snapshot captured at Phase 4 commit `2e52bd4` in [`phase5-baseline.json`](../tests/benchmarks/v1/phase5-baseline.json); a changed invariant fails CI until reviewed and deliberately rebased.
+- Zero denominators are represented as `value: null` with status `not_measurable`, never as a perfect score. Failed/unsupported analysis is not scored as successful; limit-excluded bytes and unresolved records remain explicit. The real-world SQLite 3.54.0 fixture is parsed as data only, and its upstream compiler settings are unknown rather than inferred.
+- The Phase 5 result characterizes the checked-in fixture corpus only. It does not assert universal coverage or original-source recovery. The Antigravity Nullsoft installer wrapper is outside the PE32+ x86-64 application scope and was not executed or counted as an application decompilation sample.
+
 ## Exit codes
 
 | Code | Meaning |

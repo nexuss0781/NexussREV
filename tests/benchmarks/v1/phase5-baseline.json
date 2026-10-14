@@ -1,0 +1,869 @@
+{
+  "baseline_release_commit": "2e52bd4",
+  "case_count": 10,
+  "cases": {
+    "clang-o0-pdb-dll": {
+      "decode": {
+        "decoded_bytes": 94,
+        "executable_file_backed_bytes": 94,
+        "executable_zero_fill_bytes": 0,
+        "instruction_count": 29,
+        "limited_bytes": 0,
+        "processed_bytes": 94,
+        "undecoded_bytes": 0
+      },
+      "dependencies": {
+        "capstone": "5.0.9",
+        "lief": "0.17.6"
+      },
+      "function_boundaries": {
+        "candidate_function_count": 0,
+        "fragment_count": 0,
+        "known_function_count": 4,
+        "records_total": 4,
+        "records_with_provenance": 4,
+        "symbol_provenance": {
+          "denominator": 4,
+          "numerator": 4,
+          "status": "measured",
+          "value": 1.0
+        },
+        "unresolved_range_count": 3
+      },
+      "input_sha256": "706cc1e717a404cd683dc937dc9f929d8f9eef1eb0ad9b99cee6349c06ab3a07",
+      "overall_status": "partial",
+      "parse_status": "complete",
+      "pdb_sha256": "d405139528ead496094d8aa9c8bb0991d1adcb971e8d588e13dc6aefc9970d5a",
+      "reference_backend": {
+        "compared_flow_count": 0,
+        "difference_count": 0,
+        "status": "not_configured",
+        "tool": "Ghidra",
+        "version": ""
+      },
+      "reference_sha256": null,
+      "semantic": {
+        "basic_block_count": 6,
+        "call_graph_edge_count": 2,
+        "cfg_edge_consistency": {
+          "denominator": 4,
+          "numerator": 4,
+          "status": "measured",
+          "value": 1.0
+        },
+        "cfg_edge_count": 4,
+        "cfg_edges_consistent": 4,
+        "flow_instruction_count": 6,
+        "instruction_count": 29,
+        "status": "partial",
+        "unresolved_cfg_edge_count": 0,
+        "unresolved_control_flow_count": 0,
+        "unresolved_flow_instruction_count": 0,
+        "unresolved_flow_instruction_rate": {
+          "denominator": 6,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unresolved_instruction_rate": {
+          "denominator": 29,
+          "numerator": 1,
+          "status": "measured",
+          "value": 0.034482758620689655
+        },
+        "unsupported_instruction_count": 1
+      },
+      "stage_statuses": {
+        "analysis": "partial",
+        "dataflow_analysis": "partial",
+        "emission": "complete",
+        "function_recovery": "partial",
+        "parse": "complete",
+        "semantic_analysis": "partial",
+        "symbol_provider": "complete"
+      },
+      "tool": {
+        "configuration_version": 4,
+        "name": "NexussREV",
+        "version": "0.1.0"
+      }
+    },
+    "clang-o0-pdb-exe": {
+      "decode": {
+        "decoded_bytes": 94,
+        "executable_file_backed_bytes": 94,
+        "executable_zero_fill_bytes": 0,
+        "instruction_count": 29,
+        "limited_bytes": 0,
+        "processed_bytes": 94,
+        "undecoded_bytes": 0
+      },
+      "dependencies": {
+        "capstone": "5.0.9",
+        "lief": "0.17.6"
+      },
+      "function_boundaries": {
+        "candidate_function_count": 0,
+        "fragment_count": 0,
+        "known_function_count": 4,
+        "records_total": 4,
+        "records_with_provenance": 4,
+        "symbol_provenance": {
+          "denominator": 4,
+          "numerator": 4,
+          "status": "measured",
+          "value": 1.0
+        },
+        "unresolved_range_count": 3
+      },
+      "input_sha256": "55425dab13892890b5a9c28266eea1721db6fdf9f53d9649f008879c2d1af92d",
+      "overall_status": "partial",
+      "parse_status": "complete",
+      "pdb_sha256": "e7fd06369d3bab886f62c845536374175bf0c7ad3ba4cadc7f00f2345a2308d0",
+      "reference_backend": {
+        "compared_flow_count": 0,
+        "difference_count": 0,
+        "status": "not_configured",
+        "tool": "Ghidra",
+        "version": ""
+      },
+      "reference_sha256": null,
+      "semantic": {
+        "basic_block_count": 6,
+        "call_graph_edge_count": 2,
+        "cfg_edge_consistency": {
+          "denominator": 4,
+          "numerator": 4,
+          "status": "measured",
+          "value": 1.0
+        },
+        "cfg_edge_count": 4,
+        "cfg_edges_consistent": 4,
+        "flow_instruction_count": 6,
+        "instruction_count": 29,
+        "status": "partial",
+        "unresolved_cfg_edge_count": 0,
+        "unresolved_control_flow_count": 0,
+        "unresolved_flow_instruction_count": 0,
+        "unresolved_flow_instruction_rate": {
+          "denominator": 6,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unresolved_instruction_rate": {
+          "denominator": 29,
+          "numerator": 1,
+          "status": "measured",
+          "value": 0.034482758620689655
+        },
+        "unsupported_instruction_count": 1
+      },
+      "stage_statuses": {
+        "analysis": "partial",
+        "dataflow_analysis": "partial",
+        "emission": "complete",
+        "function_recovery": "partial",
+        "parse": "complete",
+        "semantic_analysis": "partial",
+        "symbol_provider": "complete"
+      },
+      "tool": {
+        "configuration_version": 4,
+        "name": "NexussREV",
+        "version": "0.1.0"
+      }
+    },
+    "clang-o0-stripped-dll": {
+      "decode": {
+        "decoded_bytes": 94,
+        "executable_file_backed_bytes": 94,
+        "executable_zero_fill_bytes": 0,
+        "instruction_count": 29,
+        "limited_bytes": 0,
+        "processed_bytes": 94,
+        "undecoded_bytes": 0
+      },
+      "dependencies": {
+        "capstone": "5.0.9",
+        "lief": "0.17.6"
+      },
+      "function_boundaries": {
+        "candidate_function_count": 4,
+        "fragment_count": 0,
+        "known_function_count": 0,
+        "records_total": 4,
+        "records_with_provenance": 4,
+        "symbol_provenance": {
+          "denominator": 4,
+          "numerator": 4,
+          "status": "measured",
+          "value": 1.0
+        },
+        "unresolved_range_count": 3
+      },
+      "input_sha256": "ccb4108d10d4c60cb707c2cec268bbee2f397707e868231aa976de4a8646b507",
+      "overall_status": "partial",
+      "parse_status": "complete",
+      "pdb_sha256": null,
+      "reference_backend": {
+        "compared_flow_count": 0,
+        "difference_count": 0,
+        "status": "not_configured",
+        "tool": "Ghidra",
+        "version": ""
+      },
+      "reference_sha256": null,
+      "semantic": {
+        "basic_block_count": 6,
+        "call_graph_edge_count": 2,
+        "cfg_edge_consistency": {
+          "denominator": 4,
+          "numerator": 4,
+          "status": "measured",
+          "value": 1.0
+        },
+        "cfg_edge_count": 4,
+        "cfg_edges_consistent": 4,
+        "flow_instruction_count": 6,
+        "instruction_count": 29,
+        "status": "partial",
+        "unresolved_cfg_edge_count": 0,
+        "unresolved_control_flow_count": 0,
+        "unresolved_flow_instruction_count": 0,
+        "unresolved_flow_instruction_rate": {
+          "denominator": 6,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unresolved_instruction_rate": {
+          "denominator": 29,
+          "numerator": 1,
+          "status": "measured",
+          "value": 0.034482758620689655
+        },
+        "unsupported_instruction_count": 1
+      },
+      "stage_statuses": {
+        "analysis": "partial",
+        "dataflow_analysis": "partial",
+        "emission": "complete",
+        "function_recovery": "partial",
+        "parse": "complete",
+        "semantic_analysis": "partial",
+        "symbol_provider": "partial"
+      },
+      "tool": {
+        "configuration_version": 4,
+        "name": "NexussREV",
+        "version": "0.1.0"
+      }
+    },
+    "clang-o0-stripped-exe": {
+      "decode": {
+        "decoded_bytes": 94,
+        "executable_file_backed_bytes": 94,
+        "executable_zero_fill_bytes": 0,
+        "instruction_count": 29,
+        "limited_bytes": 0,
+        "processed_bytes": 94,
+        "undecoded_bytes": 0
+      },
+      "dependencies": {
+        "capstone": "5.0.9",
+        "lief": "0.17.6"
+      },
+      "function_boundaries": {
+        "candidate_function_count": 4,
+        "fragment_count": 0,
+        "known_function_count": 0,
+        "records_total": 4,
+        "records_with_provenance": 4,
+        "symbol_provenance": {
+          "denominator": 4,
+          "numerator": 4,
+          "status": "measured",
+          "value": 1.0
+        },
+        "unresolved_range_count": 3
+      },
+      "input_sha256": "245b61890d9152bc7001e1a9673391f100d3856d0d809c7d842f0d5579197d48",
+      "overall_status": "partial",
+      "parse_status": "complete",
+      "pdb_sha256": null,
+      "reference_backend": {
+        "compared_flow_count": 0,
+        "difference_count": 0,
+        "status": "not_configured",
+        "tool": "Ghidra",
+        "version": ""
+      },
+      "reference_sha256": null,
+      "semantic": {
+        "basic_block_count": 6,
+        "call_graph_edge_count": 2,
+        "cfg_edge_consistency": {
+          "denominator": 4,
+          "numerator": 4,
+          "status": "measured",
+          "value": 1.0
+        },
+        "cfg_edge_count": 4,
+        "cfg_edges_consistent": 4,
+        "flow_instruction_count": 6,
+        "instruction_count": 29,
+        "status": "partial",
+        "unresolved_cfg_edge_count": 0,
+        "unresolved_control_flow_count": 0,
+        "unresolved_flow_instruction_count": 0,
+        "unresolved_flow_instruction_rate": {
+          "denominator": 6,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unresolved_instruction_rate": {
+          "denominator": 29,
+          "numerator": 1,
+          "status": "measured",
+          "value": 0.034482758620689655
+        },
+        "unsupported_instruction_count": 1
+      },
+      "stage_statuses": {
+        "analysis": "partial",
+        "dataflow_analysis": "partial",
+        "emission": "complete",
+        "function_recovery": "partial",
+        "parse": "complete",
+        "semantic_analysis": "partial",
+        "symbol_provider": "partial"
+      },
+      "tool": {
+        "configuration_version": 4,
+        "name": "NexussREV",
+        "version": "0.1.0"
+      }
+    },
+    "clang-o2-pdb-dll": {
+      "decode": {
+        "decoded_bytes": 54,
+        "executable_file_backed_bytes": 54,
+        "executable_zero_fill_bytes": 0,
+        "instruction_count": 13,
+        "limited_bytes": 0,
+        "processed_bytes": 54,
+        "undecoded_bytes": 0
+      },
+      "dependencies": {
+        "capstone": "5.0.9",
+        "lief": "0.17.6"
+      },
+      "function_boundaries": {
+        "candidate_function_count": 0,
+        "fragment_count": 0,
+        "known_function_count": 4,
+        "records_total": 4,
+        "records_with_provenance": 4,
+        "symbol_provenance": {
+          "denominator": 4,
+          "numerator": 4,
+          "status": "measured",
+          "value": 1.0
+        },
+        "unresolved_range_count": 2
+      },
+      "input_sha256": "214531b6d8be83fbffe1aeb1d1120b56e48598f37cc65319309c2e1ac7195fcd",
+      "overall_status": "partial",
+      "parse_status": "complete",
+      "pdb_sha256": "bbe8201a8118e32cbf3119af90356890f1de65b4e13fccc2adb1fe361aeb8ebb",
+      "reference_backend": {
+        "compared_flow_count": 0,
+        "difference_count": 0,
+        "status": "not_configured",
+        "tool": "Ghidra",
+        "version": ""
+      },
+      "reference_sha256": null,
+      "semantic": {
+        "basic_block_count": 5,
+        "call_graph_edge_count": 1,
+        "cfg_edge_consistency": {
+          "denominator": 3,
+          "numerator": 3,
+          "status": "measured",
+          "value": 1.0
+        },
+        "cfg_edge_count": 3,
+        "cfg_edges_consistent": 3,
+        "flow_instruction_count": 5,
+        "instruction_count": 13,
+        "status": "partial",
+        "unresolved_cfg_edge_count": 0,
+        "unresolved_control_flow_count": 1,
+        "unresolved_flow_instruction_count": 0,
+        "unresolved_flow_instruction_rate": {
+          "denominator": 5,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unresolved_instruction_rate": {
+          "denominator": 13,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unsupported_instruction_count": 0
+      },
+      "stage_statuses": {
+        "analysis": "partial",
+        "dataflow_analysis": "partial",
+        "emission": "complete",
+        "function_recovery": "partial",
+        "parse": "complete",
+        "semantic_analysis": "partial",
+        "symbol_provider": "complete"
+      },
+      "tool": {
+        "configuration_version": 4,
+        "name": "NexussREV",
+        "version": "0.1.0"
+      }
+    },
+    "clang-o2-pdb-exe": {
+      "decode": {
+        "decoded_bytes": 54,
+        "executable_file_backed_bytes": 54,
+        "executable_zero_fill_bytes": 0,
+        "instruction_count": 13,
+        "limited_bytes": 0,
+        "processed_bytes": 54,
+        "undecoded_bytes": 0
+      },
+      "dependencies": {
+        "capstone": "5.0.9",
+        "lief": "0.17.6"
+      },
+      "function_boundaries": {
+        "candidate_function_count": 0,
+        "fragment_count": 0,
+        "known_function_count": 4,
+        "records_total": 4,
+        "records_with_provenance": 4,
+        "symbol_provenance": {
+          "denominator": 4,
+          "numerator": 4,
+          "status": "measured",
+          "value": 1.0
+        },
+        "unresolved_range_count": 2
+      },
+      "input_sha256": "157b9f5ade3982f78de4b544730d9fd58f5e013bcd238c92d67b6cec36110e7b",
+      "overall_status": "partial",
+      "parse_status": "complete",
+      "pdb_sha256": "3628c7f6907ee11cd85e556ac37d287115dd20bf970d071c0a140de0303387e7",
+      "reference_backend": {
+        "compared_flow_count": 0,
+        "difference_count": 0,
+        "status": "not_configured",
+        "tool": "Ghidra",
+        "version": ""
+      },
+      "reference_sha256": null,
+      "semantic": {
+        "basic_block_count": 5,
+        "call_graph_edge_count": 1,
+        "cfg_edge_consistency": {
+          "denominator": 3,
+          "numerator": 3,
+          "status": "measured",
+          "value": 1.0
+        },
+        "cfg_edge_count": 3,
+        "cfg_edges_consistent": 3,
+        "flow_instruction_count": 5,
+        "instruction_count": 13,
+        "status": "partial",
+        "unresolved_cfg_edge_count": 0,
+        "unresolved_control_flow_count": 1,
+        "unresolved_flow_instruction_count": 0,
+        "unresolved_flow_instruction_rate": {
+          "denominator": 5,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unresolved_instruction_rate": {
+          "denominator": 13,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unsupported_instruction_count": 0
+      },
+      "stage_statuses": {
+        "analysis": "partial",
+        "dataflow_analysis": "partial",
+        "emission": "complete",
+        "function_recovery": "partial",
+        "parse": "complete",
+        "semantic_analysis": "partial",
+        "symbol_provider": "complete"
+      },
+      "tool": {
+        "configuration_version": 4,
+        "name": "NexussREV",
+        "version": "0.1.0"
+      }
+    },
+    "clang-o2-stripped-dll": {
+      "decode": {
+        "decoded_bytes": 54,
+        "executable_file_backed_bytes": 54,
+        "executable_zero_fill_bytes": 0,
+        "instruction_count": 13,
+        "limited_bytes": 0,
+        "processed_bytes": 54,
+        "undecoded_bytes": 0
+      },
+      "dependencies": {
+        "capstone": "5.0.9",
+        "lief": "0.17.6"
+      },
+      "function_boundaries": {
+        "candidate_function_count": 2,
+        "fragment_count": 0,
+        "known_function_count": 0,
+        "records_total": 2,
+        "records_with_provenance": 2,
+        "symbol_provenance": {
+          "denominator": 2,
+          "numerator": 2,
+          "status": "measured",
+          "value": 1.0
+        },
+        "unresolved_range_count": 2
+      },
+      "input_sha256": "2fc71ba27aa6d07c224c45db93e106188c4388e089cb16f30b85d73624f5feb3",
+      "overall_status": "partial",
+      "parse_status": "complete",
+      "pdb_sha256": null,
+      "reference_backend": {
+        "compared_flow_count": 0,
+        "difference_count": 0,
+        "status": "not_configured",
+        "tool": "Ghidra",
+        "version": ""
+      },
+      "reference_sha256": null,
+      "semantic": {
+        "basic_block_count": 2,
+        "call_graph_edge_count": 1,
+        "cfg_edge_consistency": {
+          "denominator": 2,
+          "numerator": 2,
+          "status": "measured",
+          "value": 1.0
+        },
+        "cfg_edge_count": 2,
+        "cfg_edges_consistent": 2,
+        "flow_instruction_count": 5,
+        "instruction_count": 13,
+        "status": "partial",
+        "unresolved_cfg_edge_count": 0,
+        "unresolved_control_flow_count": 0,
+        "unresolved_flow_instruction_count": 0,
+        "unresolved_flow_instruction_rate": {
+          "denominator": 5,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unresolved_instruction_rate": {
+          "denominator": 13,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unsupported_instruction_count": 0
+      },
+      "stage_statuses": {
+        "analysis": "partial",
+        "dataflow_analysis": "partial",
+        "emission": "complete",
+        "function_recovery": "partial",
+        "parse": "complete",
+        "semantic_analysis": "partial",
+        "symbol_provider": "partial"
+      },
+      "tool": {
+        "configuration_version": 4,
+        "name": "NexussREV",
+        "version": "0.1.0"
+      }
+    },
+    "clang-o2-stripped-exe": {
+      "decode": {
+        "decoded_bytes": 54,
+        "executable_file_backed_bytes": 54,
+        "executable_zero_fill_bytes": 0,
+        "instruction_count": 13,
+        "limited_bytes": 0,
+        "processed_bytes": 54,
+        "undecoded_bytes": 0
+      },
+      "dependencies": {
+        "capstone": "5.0.9",
+        "lief": "0.17.6"
+      },
+      "function_boundaries": {
+        "candidate_function_count": 2,
+        "fragment_count": 0,
+        "known_function_count": 0,
+        "records_total": 2,
+        "records_with_provenance": 2,
+        "symbol_provenance": {
+          "denominator": 2,
+          "numerator": 2,
+          "status": "measured",
+          "value": 1.0
+        },
+        "unresolved_range_count": 2
+      },
+      "input_sha256": "faddeaa8d0691a04db86d54f33f09b32188189c2e0abca8c27a011e27a3b5861",
+      "overall_status": "partial",
+      "parse_status": "complete",
+      "pdb_sha256": null,
+      "reference_backend": {
+        "compared_flow_count": 0,
+        "difference_count": 0,
+        "status": "not_configured",
+        "tool": "Ghidra",
+        "version": ""
+      },
+      "reference_sha256": null,
+      "semantic": {
+        "basic_block_count": 2,
+        "call_graph_edge_count": 1,
+        "cfg_edge_consistency": {
+          "denominator": 2,
+          "numerator": 2,
+          "status": "measured",
+          "value": 1.0
+        },
+        "cfg_edge_count": 2,
+        "cfg_edges_consistent": 2,
+        "flow_instruction_count": 5,
+        "instruction_count": 13,
+        "status": "partial",
+        "unresolved_cfg_edge_count": 0,
+        "unresolved_control_flow_count": 0,
+        "unresolved_flow_instruction_count": 0,
+        "unresolved_flow_instruction_rate": {
+          "denominator": 5,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unresolved_instruction_rate": {
+          "denominator": 13,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unsupported_instruction_count": 0
+      },
+      "stage_statuses": {
+        "analysis": "partial",
+        "dataflow_analysis": "partial",
+        "emission": "complete",
+        "function_recovery": "partial",
+        "parse": "complete",
+        "semantic_analysis": "partial",
+        "symbol_provider": "partial"
+      },
+      "tool": {
+        "configuration_version": 4,
+        "name": "NexussREV",
+        "version": "0.1.0"
+      }
+    },
+    "compiler-generated-x64-ghidra-11.3.2": {
+      "decode": {
+        "decoded_bytes": 31,
+        "executable_file_backed_bytes": 31,
+        "executable_zero_fill_bytes": 0,
+        "instruction_count": 8,
+        "limited_bytes": 0,
+        "processed_bytes": 31,
+        "undecoded_bytes": 0
+      },
+      "dependencies": {
+        "capstone": "5.0.9",
+        "lief": "0.17.6"
+      },
+      "function_boundaries": {
+        "candidate_function_count": 2,
+        "fragment_count": 0,
+        "known_function_count": 0,
+        "records_total": 2,
+        "records_with_provenance": 2,
+        "symbol_provenance": {
+          "denominator": 2,
+          "numerator": 2,
+          "status": "measured",
+          "value": 1.0
+        },
+        "unresolved_range_count": 1
+      },
+      "input_sha256": "c1b4a7ac601caa370f22a9df69a1f930149c7f557930bf40b67a6746ea0f13bd",
+      "overall_status": "partial",
+      "parse_status": "complete",
+      "pdb_sha256": null,
+      "reference_backend": {
+        "compared_flow_count": 2,
+        "difference_count": 0,
+        "status": "compared",
+        "tool": "Ghidra",
+        "version": "11.3.2"
+      },
+      "reference_sha256": "0425da3e22684d4afb47d7f7f44484acb0c73b7ad6a7e26f91c2a3a502fd65ee",
+      "semantic": {
+        "basic_block_count": 0,
+        "call_graph_edge_count": 0,
+        "cfg_edge_consistency": {
+          "denominator": 0,
+          "numerator": 0,
+          "status": "not_measurable",
+          "value": null
+        },
+        "cfg_edge_count": 0,
+        "cfg_edges_consistent": 0,
+        "flow_instruction_count": 2,
+        "instruction_count": 8,
+        "status": "partial",
+        "unresolved_cfg_edge_count": 0,
+        "unresolved_control_flow_count": 0,
+        "unresolved_flow_instruction_count": 0,
+        "unresolved_flow_instruction_rate": {
+          "denominator": 2,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unresolved_instruction_rate": {
+          "denominator": 8,
+          "numerator": 0,
+          "status": "measured",
+          "value": 0.0
+        },
+        "unsupported_instruction_count": 0
+      },
+      "stage_statuses": {
+        "analysis": "partial",
+        "dataflow_analysis": "partial",
+        "emission": "complete",
+        "function_recovery": "partial",
+        "parse": "complete",
+        "semantic_analysis": "partial",
+        "symbol_provider": "partial"
+      },
+      "tool": {
+        "configuration_version": 4,
+        "name": "NexussREV",
+        "version": "0.1.0"
+      }
+    },
+    "sqlite-win-x64-3.54.0": {
+      "decode": {
+        "decoded_bytes": 34476,
+        "executable_file_backed_bytes": 2904159,
+        "executable_zero_fill_bytes": 0,
+        "instruction_count": 20000,
+        "limited_bytes": 2869683,
+        "processed_bytes": 34476,
+        "undecoded_bytes": 0
+      },
+      "dependencies": {
+        "capstone": "5.0.9",
+        "lief": "0.17.6"
+      },
+      "function_boundaries": {
+        "candidate_function_count": 785,
+        "fragment_count": 0,
+        "known_function_count": 0,
+        "records_total": 785,
+        "records_with_provenance": 785,
+        "symbol_provenance": {
+          "denominator": 785,
+          "numerator": 785,
+          "status": "measured",
+          "value": 1.0
+        },
+        "unresolved_range_count": 1
+      },
+      "input_sha256": "5ca6a16bdd2c5a5037b1e3a942d9ac1c66efe2def902b202d44774680a8a4656",
+      "overall_status": "partial",
+      "parse_status": "complete",
+      "pdb_sha256": null,
+      "reference_backend": {
+        "compared_flow_count": 0,
+        "difference_count": 0,
+        "status": "not_configured",
+        "tool": "Ghidra",
+        "version": ""
+      },
+      "reference_sha256": null,
+      "semantic": {
+        "basic_block_count": 0,
+        "call_graph_edge_count": 0,
+        "cfg_edge_consistency": {
+          "denominator": 0,
+          "numerator": 0,
+          "status": "not_measurable",
+          "value": null
+        },
+        "cfg_edge_count": 0,
+        "cfg_edges_consistent": 0,
+        "flow_instruction_count": 19368,
+        "instruction_count": 20000,
+        "status": "partial",
+        "unresolved_cfg_edge_count": 0,
+        "unresolved_control_flow_count": 0,
+        "unresolved_flow_instruction_count": 16119,
+        "unresolved_flow_instruction_rate": {
+          "denominator": 19368,
+          "numerator": 16119,
+          "status": "measured",
+          "value": 0.8322490706319703
+        },
+        "unresolved_instruction_rate": {
+          "denominator": 20000,
+          "numerator": 16105,
+          "status": "measured",
+          "value": 0.80525
+        },
+        "unsupported_instruction_count": 16105
+      },
+      "stage_statuses": {
+        "analysis": "partial",
+        "dataflow_analysis": "partial",
+        "emission": "complete",
+        "function_recovery": "partial",
+        "parse": "complete",
+        "semantic_analysis": "partial",
+        "symbol_provider": "partial"
+      },
+      "tool": {
+        "configuration_version": 4,
+        "name": "NexussREV",
+        "version": "0.1.0"
+      }
+    }
+  },
+  "corpus": "NexussREV Phase 5 static validation corpus",
+  "format_version": 1,
+  "method": "Stable analysis invariants captured from the Phase 4 release commit before Phase 5 reporting was added. A changed invariant requires review and an explicit baseline update; input identity, tool/dependency versions, and the independent Gate 2/Gate 4 floors remain enforced."
+}

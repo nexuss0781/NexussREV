@@ -1,4 +1,4 @@
-name: Phase 1/2/3/4 CI
+name: Phase 1/2/3/4/5 CI
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   linux-x64:
-    name: Linux x64 build and tests (Phase 1/2/3/4)
+    name: Linux x64 build and tests (Phase 1/2/3/4/5)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -44,6 +44,12 @@ jobs:
           name: phase4-gate4-benchmark
           path: build/phase4-benchmark-results.json
           if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase5-gate5-validation
+          path: build/phase5-validation-results.json
+          if-no-files-found: ignore
       - name: Install MinGW-w64
         run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64 binutils-mingw-w64-x86-64
       - name: Benchmark MinGW toolchain
@@ -64,7 +70,7 @@ jobs:
           if-no-files-found: ignore
 
   windows-x64:
-    name: Windows x64 build and tests (Phase 1/2/3/4)
+    name: Windows x64 build and tests (Phase 1/2/3/4/5)
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -94,6 +100,12 @@ jobs:
         run: cmake --build build --config Release --parallel 2
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase5-gate5-validation-windows
+          path: build/phase5-validation-results.json
+          if-no-files-found: ignore
       - name: Locate clang-cl and lld-link
         shell: pwsh
         run: |

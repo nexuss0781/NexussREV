@@ -1,0 +1,114 @@
+{
+  "format_version": 1,
+  "name": "NexussREV Phase 5 static validation corpus",
+  "fixture_root": "../../fixtures",
+  "baseline_release_commit": "2e52bd4",
+  "scope": "Native PE32+ AMD64 static analysis and quality reporting. No input binary is executed.",
+  "method": "Analyze SHA-256-pinned PE inputs as data; validate each report against the versioned schema; measure decode accounting, labelled boundaries, CFG edge integrity, unresolved facts, evidence provenance, signature/type metrics, reference differences, and artifact completeness.",
+  "analyzer_command_template": "nexusrev [--pdb <matching.pdb>] [--reference-report <sha256-pinned.tsv>] <input.exe> <temporary-output>",
+  "source_urls": [
+    "https://www.sqlite.org/download.html",
+    "https://www.sqlite.org/copyright.html",
+    "https://www.sqlite.org/releaselog/3_54_0.html"
+  ],
+  "phase2_build_provenance": {
+    "source": "phase2/corpus.c",
+    "source_sha256": "9bbbf1c673ce7365a51b28d9a9cbe3b9cc9bea045baf718c856a65c1ba880d92",
+    "compiler_and_linker": "Ubuntu Clang 18.1.3 (1ubuntu1), target x86_64-pc-windows-msvc; LLD 18.1.3",
+    "compile_commands": {
+      "O0": "clang++ --target=x86_64-pc-windows-msvc -x c -g -gcodeview -O0 -fno-inline -c corpus.c -o /tmp/nexussrev-o0.obj",
+      "O2": "clang++ --target=x86_64-pc-windows-msvc -x c -g -gcodeview -O2 -c corpus.c -o /tmp/nexussrev-o2.obj"
+    },
+    "link_commands": {
+      "dll": "lld-link /dll /noentry /debug /pdb:<sample>.pdb /out:<sample>.dll /export:add_one /export:call_add /export:call_helper /tmp/nexussrev-<optimization>.obj",
+      "exe": "lld-link /entry:add_one /subsystem:console /nodefaultlib /debug /pdb:<sample>.pdb /out:<sample>.exe /tmp/nexussrev-<optimization>.obj"
+    },
+    "stripping": "For stripped variants, zero the PE export (data-directory 0) and debug/CodeView (data-directory 6) entries; executable bytes and exception/unwind metadata are retained."
+  },
+  "samples": [
+    {
+      "id": "sqlite-win-x64-3.54.0",
+      "source_kind": "official_real_world_release",
+      "input": "realworld/sqlite3-3.54.0-x64.dll",
+      "input_sha256": "5ca6a16bdd2c5a5037b1e3a942d9ac1c66efe2def902b202d44774680a8a4656",
+      "expected_parse_status": "complete",
+      "expected_pe": {
+        "machine": 34404,
+        "optional_header_magic": 523,
+        "pe32_plus": true,
+        "supported_x64_native": true,
+        "is_dll": true
+      },
+      "provenance": {
+        "project": "SQLite",
+        "release": "3.54.0",
+        "kind": "official precompiled Windows x64 DLL",
+        "download_page": "https://www.sqlite.org/download.html",
+        "archive_url": "https://www.sqlite.org/2026/sqlite-dll-win-x64-3540000.zip",
+        "archive_sha3_256": "f5fb500c73a3afd89976386bb8e4fdc8b5b65c052e187fb1ada1f5de034cd45b",
+        "license": "Public domain; SQLite states that its deliverable code may be copied, modified, compiled, sold, and distributed for any purpose.",
+        "compiler_and_linker": "Not identified on the official binary download page; intentionally recorded as unknown.",
+        "compiler_flags": "Not published with this precompiled DLL; intentionally recorded as unknown.",
+        "static_analysis_policy": "The PE is parsed as untrusted data and is never loaded or executed."
+      }
+    },
+    {
+      "id": "compiler-generated-x64-ghidra-11.3.2",
+      "source_kind": "compiler_generated_regression_and_reference",
+      "input": "compiler-generated-x64.exe",
+      "input_sha256": "c1b4a7ac601caa370f22a9df69a1f930149c7f557930bf40b67a6746ea0f13bd",
+      "expected_parse_status": "complete",
+      "expected_pe": {
+        "machine": 34404,
+        "optional_header_magic": 523,
+        "pe32_plus": true,
+        "supported_x64_native": true,
+        "is_dll": false
+      },
+      "provenance": {
+        "source": "compiler-generated-x64.c",
+        "source_sha256": "50dd3f28ae6707e9ec03e935e33514ebefc0b1646472d118f970a2945bb9ff84",
+        "source_hash_normalization": "CRLF_TO_LF",
+        "compiler_and_linker": "Clang 18.1.3 and LLD 18.1.3, target x86_64-pc-windows-msvc.",
+        "compile_command": "clang --target=x86_64-pc-windows-msvc -ffreestanding -fno-stack-protector -O1 -c -o compiler-generated-x64.obj compiler-generated-x64.c",
+        "link_command": "lld-link /entry:entry /subsystem:console /nodefaultlib /noimplib /machine:x64 /timestamp:0 /out:compiler-generated-x64.exe compiler-generated-x64.obj",
+        "distribution": "Original NexussREV fixture source."
+      },
+      "reference_report": "compiler-generated-x64-ghidra-11.3.2.tsv",
+      "reference_sha256": "0425da3e22684d4afb47d7f7f44484acb0c73b7ad6a7e26f91c2a3a502fd65ee",
+      "expected_reference_tool": "Ghidra",
+      "expected_reference_version": "11.3.2",
+      "maximum_reference_differences": 0
+    }
+  ],
+  "malformed_cases": [
+    {
+      "id": "synthetic-malformed-pe-rejected",
+      "input_hex": "6e6f74206120504520696d6167650001",
+      "input_sha256": "528ea34a0e3fea64816e53430383b903ed4491894e9ef16e15b55bd8d9ebaa6d",
+      "expected_exit_code": 3,
+      "expected_diagnostic": "INPUT_PARSE_FAILED"
+    }
+  ],
+  "gates": {
+    "minimum_valid_sample_count": 10,
+    "minimum_labelled_boundary_case_count": 8,
+    "minimum_valid_pe_parse_success": 1.0,
+    "minimum_parse_outcome_conformance": 1.0,
+    "minimum_sqlite_decode_coverage": 0.01,
+    "minimum_cfg_edge_consistency": 1.0,
+    "minimum_symbol_provenance_completeness": 1.0,
+    "minimum_output_completeness": 1.0,
+    "maximum_reference_differences": 0,
+    "boundary_floors_source": "tests/benchmarks/v1/baseline.json",
+    "type_and_signature_floors_source": "tests/benchmarks/v1/phase4-ground-truth.json"
+  },
+  "limitations": [
+    "All accuracy claims are measured on the named, hash-identified corpus only; they do not generalize to arbitrary binaries or compiler families.",
+    "The SQLite DLL is a real-world public-domain PE, but its official download page does not publish its compiler identity or build flags; those fields remain explicitly unknown.",
+    "The SQLite DLL exceeds the analyzer's configured record budget; decode coverage and limit-excluded bytes are both reported rather than implying full disassembly.",
+    "The checked-in Clang/LLD fixtures are small original test programs. Existing Phase 2 and Phase 4 truth labels remain the only source-known boundary and signature/type samples.",
+    "The downloaded Antigravity-x64.exe is a 32-bit Nullsoft installer wrapper, outside the native PE32+ x86-64 application target; it is excluded and was not executed. No compatible Antigravity application binary was analyzed.",
+    "Dynamic execution, compile-and-test, and differential execution are not performed; all binaries and PDBs are handled as static data."
+  ]
+}

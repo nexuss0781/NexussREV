@@ -93,3 +93,21 @@ add_test(
             --output ${CMAKE_CURRENT_BINARY_DIR}/phase4-benchmark-results.json
 )
 set_tests_properties(nexusrev_phase4_benchmark PROPERTIES TIMEOUT 120)
+
+add_test(
+    NAME nexusrev_phase5_validation
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/phase5_validation.py
+            --program $<TARGET_FILE:nexusrev>
+            --corpus ${CMAKE_CURRENT_SOURCE_DIR}/tests/benchmarks/v1/phase5-corpus.json
+            --phase2-manifest ${CMAKE_CURRENT_SOURCE_DIR}/tests/benchmarks/v1/corpus.json
+            --phase2-baseline ${CMAKE_CURRENT_SOURCE_DIR}/tests/benchmarks/v1/baseline.json
+            --phase4-ground-truth ${CMAKE_CURRENT_SOURCE_DIR}/tests/benchmarks/v1/phase4-ground-truth.json
+            --phase4-results ${CMAKE_CURRENT_BINARY_DIR}/phase4-benchmark-results.json
+            --release-baseline ${CMAKE_CURRENT_SOURCE_DIR}/tests/benchmarks/v1/phase5-baseline.json
+            --schema ${CMAKE_CURRENT_SOURCE_DIR}/docs/analysis-report.schema.json
+            --output ${CMAKE_CURRENT_BINARY_DIR}/phase5-validation-results.json
+)
+set_tests_properties(nexusrev_phase5_validation PROPERTIES
+    DEPENDS nexusrev_phase4_benchmark
+    TIMEOUT 240
+)
