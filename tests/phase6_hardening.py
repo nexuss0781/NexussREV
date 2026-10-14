@@ -15,13 +15,14 @@ import time
 import jsonschema
 
 
-def run(program, *arguments, timeout=30):
+def run(program, *arguments, timeout=30, cwd=None):
     return subprocess.run(
         [str(program), *map(str, arguments)],
         capture_output=True,
         text=True,
         check=False,
         timeout=timeout,
+        cwd=cwd,
     )
 
 
@@ -122,8 +123,11 @@ def main():
         assert all(set(record) == {"level", "code", "message"} for record in log_records)
 
         aliased_target = root / "aliased-output.txt"
-        relative_alias = os.path.relpath(aliased_target, pathlib.Path.cwd())
-        alias_result = run(args.program, "--report-json", aliased_target, args.fixture, relative_alias)
+        relative_alias = os.path.relpath(aliased_target, root)
+        alias_result = run(
+            args.program.resolve(), "--report-json", aliased_target,
+            args.fixture.resolve(), relative_alias, cwd=root,
+        )
         assert alias_result.returncode == 2 and "paths must be different" in alias_result.stderr
         assert not aliased_target.exists()
         if os.name == "nt":
