@@ -4,6 +4,7 @@
   "fixture_root": "../../fixtures/phase2",
   "source": "corpus.c",
   "source_sha256": "9bbbf1c673ce7365a51b28d9a9cbe3b9cc9bea045baf718c856a65c1ba880d92",
+  "source_hash_normalization": "CRLF_TO_LF",
   "truth_sets": {
     "clang_o0": [
       { "name": "add_one", "start_rva": 4096, "end_rva": 4110 },

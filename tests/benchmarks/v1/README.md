@@ -1,6 +1,6 @@
 # Phase 2 boundary benchmark v1
 
-This is the checked-in Gate 2 numeric baseline. [`corpus.json`](corpus.json) pins source, every PE, and every PDB by SHA-256; stores human-readable function labels and half-open `[start_rva, end_rva)` truth ranges; and specifies the expected symbol-provider state. [`baseline.json`](baseline.json) pins the minimum precision/recall floors and the review policy. The fixtures are original test code and their binaries are analyzed as data only; no PE is executed.
+This is the checked-in Gate 2 numeric baseline. [`corpus.json`](corpus.json) pins source by SHA-256 after canonicalizing CRLF to LF (so Windows checkout settings do not affect identity), and pins every PE/PDB by exact-byte SHA-256. It stores human-readable function labels and half-open `[start_rva, end_rva)` truth ranges and specifies the expected symbol-provider state. [`baseline.json`](baseline.json) pins the minimum precision/recall floors and the review policy. The fixtures are original test code and their binaries are analyzed as data only; no PE is executed.
 
 The eight cases cover **O0 and O2**, **EXE and DLL**, with a matching PDB and with both the export directory and CodeView/debug directory removed. The stripped files retain the code and x64 exception/unwind tables. The O2 stripped cases intentionally expose missed leaf/helper functions where no unwind range or reachable direct target remains; those misses count against recall instead of being waived.
 

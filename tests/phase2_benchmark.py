@@ -36,9 +36,12 @@ def main():
     baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
     if manifest.get("format_version") != 1 or baseline.get("format_version") != 1:
         raise SystemExit("unsupported benchmark corpus/baseline format")
+    if manifest.get("source_hash_normalization") != "CRLF_TO_LF":
+        raise SystemExit("unsupported benchmark source-hash normalization policy")
     fixture_root = (args.manifest.parent / manifest["fixture_root"]).resolve()
     source_path = fixture_root / manifest["source"]
-    source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    source_bytes = source_path.read_bytes().replace(b"\r\n", b"\n")
+    source_sha256 = hashlib.sha256(source_bytes).hexdigest()
     if source_sha256 != manifest["source_sha256"]:
         raise SystemExit(f"source hash mismatch: expected {manifest['source_sha256']}, got {source_sha256}")
     results = []
