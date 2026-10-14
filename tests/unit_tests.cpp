@@ -1,7 +1,10 @@
 #include "sha256.hpp"
 #include "pe_image.hpp"
+#include "phase3.hpp"
 
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -37,6 +40,47 @@ std::vector<std::uint8_t> minimal_pe() {
     bytes[0x200U] = 0xc3U;
     return bytes;
 }
+
+bool has(const std::vector<std::string>& values, const std::string& wanted) {
+    for (const auto& value : values) if (value == wanted) return true;
+    return false;
+}
+
+nexusrev::X86OperandRecord reg_operand(const std::string& name, std::uint8_t access = 3U) {
+    nexusrev::X86OperandRecord op;
+    op.type = "register"; op.reg = name; op.size = 8U; op.access = access;
+    return op;
+}
+nexusrev::X86OperandRecord imm_operand(std::uint64_t va) {
+    nexusrev::X86OperandRecord op;
+    op.type = "immediate"; op.size = 4U; op.access = 1U;
+    op.immediate = static_cast<std::int64_t>(va);
+    return op;
+}
+nexusrev::InstructionRecord synthetic_instruction(std::uint32_t rva, std::string mnemonic,
+                                                   std::string bytes = "90") {
+    nexusrev::InstructionRecord insn;
+    insn.rva = rva;
+    insn.va = 0x140000000ULL + rva;
+    insn.bytes = std::move(bytes);
+    insn.mnemonic = std::move(mnemonic);
+    insn.detail_available = true;
+    insn.detail_operands = {reg_operand("rax"), reg_operand("rcx", 1U)};
+    return insn;
+}
+void configure_pe(nexusrev::AnalysisReport& report) {
+    report.pe.supported_x64_native = true;
+    report.pe.machine = 0x8664U;
+    report.pe.pe32_plus = true;
+    report.pe.image_base = 0x140000000ULL;
+    report.pe.size_of_image = 0x4000U;
+    nexusrev::PeSection section;
+    section.name = ".text"; section.virtual_address = 0x1000U;
+    section.file_backed_size = 0x3000U; section.mapped_size = 0x3000U;
+    section.virtual_size = 0x3000U; section.executable = true;
+    report.pe.sections.push_back(section);
+}
+
 bool pe_parser_tests() {
     nexusrev::PeImage image;
     std::string code, message;
@@ -86,6 +130,247 @@ bool pe_parser_tests() {
     }
     return true;
 }
+
+bool semantic_operation_tests() {
+    nexusrev::AnalysisReport report;
+    configure_pe(report);
+    const std::vector<std::string> operations = {
+        "nop", "mov", "movabs", "movzx", "movsx", "movsxd", "lea",
+        "add", "sub", "adc", "sbb", "inc", "dec", "neg", "and", "or", "xor", "not",
+        "cmp", "test", "imul", "mul", "div", "idiv", "xchg", "shl", "sal", "shr", "sar",
+        "push", "pop", "pushfq", "popfq", "leave", "call", "call", "jmp", "jmp",
+        "je", "jne", "jb", "ja", "jl", "jge", "jle", "jg", "jo", "jno", "js", "jns", "jp", "jnp",
+        "setne", "cmovg", "ret", "vzeroupper"
+    };
+    std::uint32_t rva = 0x1000U;
+    for (const auto& mnemonic : operations) {
+        auto insn = synthetic_instruction(rva++, mnemonic);
+        if (mnemonic == "call" || mnemonic == "jmp" || mnemonic[0] == 'j') {
+            if (mnemonic == "jmp" && insn.rva == 0x1025U) insn.detail_operands = {reg_operand("rax", 1U)};
+            else insn.detail_operands = {imm_operand(0x140001100ULL)};
+        }
+        report.instructions.push_back(std::move(insn));
+    }
+    auto push16 = synthetic_instruction(rva++, "push", "66 50");
+    push16.prefixes[0] = 0x66U;
+    auto ax = reg_operand("ax", 1U); ax.size = 2U;
+    push16.detail_operands = {ax};
+    report.instructions.push_back(std::move(push16));
+    auto pop16 = synthetic_instruction(rva++, "pop", "66 58");
+    pop16.prefixes[0] = 0x66U;
+    auto bx = reg_operand("bx", 2U); bx.size = 2U;
+    pop16.detail_operands = {bx};
+    report.instructions.push_back(std::move(pop16));
+    // Exercise detail-unavailable behavior independently from the unsupported opcode case.
+    auto no_detail = synthetic_instruction(rva, "mov");
+    no_detail.detail_available = false;
+    report.instructions.push_back(std::move(no_detail));
+    nexusrev::analyze_semantics(report);
+    const auto find_sem = [&report](std::uint32_t address) -> const nexusrev::SemanticInstructionRecord* {
+        for (const auto& sem : report.semantic_analysis.instructions) if (sem.rva == address) return &sem;
+        return nullptr;
+    };
+    if (report.semantic_analysis.instructions.size() != operations.size() + 3U ||
+        report.semantic_analysis.unsupported_instruction_count != 6U) {
+        std::cerr << "semantic lifting did not account for all modeled/unsupported instructions\n"; return false;
+    }
+    const auto add = find_sem(0x1007U);
+    const auto inc = find_sem(0x100bU);
+    const auto logical = find_sem(0x100eU);
+    if (add == nullptr || add->status != "modeled" || !has(add->flags_written, "CF") || !has(add->flags_written, "OF") ||
+        inc == nullptr || !has(inc->flags_preserved, "CF") || has(inc->flags_written, "CF") ||
+        logical == nullptr || !has(logical->flags_undefined, "AF")) {
+        std::cerr << "arithmetic/logical flag effects are missing or incorrect\n"; return false;
+    }
+    bool checked_unsigned = false, checked_signed = false, checked_preserved = false;
+    unsigned int unsupported_shifts = 0U;
+    for (const auto& sem : report.semantic_analysis.instructions) {
+        if (sem.condition == "unsigned_below") checked_unsigned = has(sem.flags_read, "CF");
+        if (sem.condition == "signed_less") checked_signed = has(sem.flags_read, "SF") && has(sem.flags_read, "OF");
+        if (sem.rva >= 0x1019U && sem.rva <= 0x101cU && sem.status == "unsupported") ++unsupported_shifts;
+        if (sem.operation == "copy") checked_preserved = has(sem.flags_preserved, "CF") && has(sem.flags_preserved, "ZF");
+    }
+    if (!checked_unsigned || !checked_signed || !checked_preserved || unsupported_shifts != 4U) {
+        std::cerr << "condition-code effects are missing or count-dependent shifts were falsely modeled\n"; return false;
+    }
+    bool saw_push = false, saw_pop = false, saw_return = false, saw_pushf = false, saw_popf = false;
+    bool saw_push16 = false, saw_pop16 = false, saw_direct_call = false, saw_indirect_jump = false;
+    for (const auto& sem : report.semantic_analysis.instructions) {
+        if (sem.operation == "push" && sem.stack_delta == -8 && sem.memory_written) saw_push = true;
+        if (sem.operation == "pop" && sem.stack_delta == 8 && sem.memory_read) saw_pop = true;
+        if (sem.rva == rva - 2U) saw_push16 = sem.operation == "push" && sem.stack_delta == -2;
+        if (sem.rva == rva - 1U) saw_pop16 = sem.operation == "pop" && sem.stack_delta == 2;
+        if (sem.operation == "return") saw_return = sem.stack_delta == 8 && sem.control_flow == "return";
+        if (sem.rva == 0x101fU) saw_pushf = has(sem.flags_read, "RFLAGS");
+        if (sem.rva == 0x1020U) saw_popf = has(sem.flags_written, "RFLAGS");
+        if (sem.control_flow == "direct_call") saw_direct_call = sem.target_rva == 0x1100U && sem.stack_delta == 0;
+        if (sem.control_flow == "indirect_branch") saw_indirect_jump = !sem.target_rva && !sem.unresolved_reason.empty();
+    }
+    if (!saw_push || !saw_pop || !saw_push16 || !saw_pop16 || !saw_return || !saw_pushf || !saw_popf || !saw_direct_call || !saw_indirect_jump) {
+        std::cerr << "stack, call/return, or indirect-branch semantics are missing\n"; return false;
+    }
+    const auto unsupported = find_sem(rva - 3U);
+    const auto no_detail_sem = find_sem(rva);
+    if (unsupported == nullptr || unsupported->status != "unsupported" ||
+        no_detail_sem == nullptr || no_detail_sem->unresolved_reason != "decoder_detail_unavailable_control_flow_unknown" ||
+        no_detail_sem->control_flow != "unknown") {
+        std::cerr << "unsupported instruction or missing-detail diagnostics are not visible\n"; return false;
+    }
+    return true;
+}
+
+bool cfg_and_reference_tests() {
+    nexusrev::AnalysisReport report;
+    configure_pe(report);
+    report.input_sha256 = std::string(64U, 'a');
+    auto add = [&report](std::uint32_t rva, const std::string& mnemonic, const std::string& bytes,
+                         std::vector<nexusrev::X86OperandRecord> operands = {}) {
+        auto insn = synthetic_instruction(rva, mnemonic, bytes);
+        if (!operands.empty()) insn.detail_operands = std::move(operands);
+        report.instructions.push_back(std::move(insn));
+    };
+    add(0x1000U, "push", "50", {reg_operand("rbx", 1U)});
+    add(0x1001U, "cmp", "83 f8 00", {reg_operand("eax", 1U), imm_operand(0)});
+    add(0x1004U, "jb", "72 02", {imm_operand(0x140001008ULL)});
+    add(0x1006U, "nop", "90", {});
+    add(0x1007U, "nop", "90", {});
+    add(0x1008U, "call", "e8 13 00 00 00", {imm_operand(0x140001020ULL)});
+    add(0x100dU, "pop", "5b", {reg_operand("rbx", 2U)});
+    add(0x100eU, "ret", "c3", {});
+    nexusrev::FunctionRecord function;
+    function.entity_kind = "candidate_function"; function.boundary_status = "evidence_bounded";
+    function.start_rva = 0x1000U; function.end_rva = 0x100fU; function.label = "synthetic";
+    function.evidence.push_back({"synthetic_test", "labelled synthetic function", 1.0, std::nullopt, 0x1000U, 0x100fU});
+    report.function_recovery.candidate_functions.push_back(function);
+    nexusrev::analyze_semantics(report);
+    if (report.semantic_analysis.functions.size() != 1U || !report.semantic_analysis.functions[0].semantic_complete ||
+        report.semantic_analysis.functions[0].status != "complete") {
+        std::cerr << "fully modeled bounded synthetic function was not semantically complete\n"; return false;
+    }
+    bool true_edge = false, false_edge = false, call_edge = false, fallthrough = false;
+    for (const auto& edge : report.semantic_analysis.cfg_edges) {
+        if (edge.kind == "conditional_true" && edge.from_rva == 0x1004U && edge.target_rva == 0x1008U) true_edge = true;
+        if (edge.kind == "conditional_false" && edge.from_rva == 0x1004U && edge.target_rva == 0x1006U) false_edge = true;
+        if (edge.kind == "call" && edge.from_rva == 0x1008U && edge.target_rva == 0x1020U) call_edge = true;
+        if (edge.kind == "fallthrough" && edge.from_rva == 0x1008U && edge.target_rva == 0x100dU) fallthrough = true;
+    }
+    if (!true_edge || !false_edge || !call_edge || !fallthrough || report.semantic_analysis.call_graph.size() != 1U ||
+        report.semantic_analysis.call_graph[0].resolution != "direct_target") {
+        std::cerr << "CFG conditional, call, or fallthrough edges are missing\n"; return false;
+    }
+    const auto reference_path = std::filesystem::temp_directory_path() / "nexusrev-ghidra-reference-test.tsv";
+    {
+        std::ofstream reference(reference_path, std::ios::binary | std::ios::trunc);
+        reference << "NEXUSREV_GHIDRA_REFERENCE\t1\t" << report.input_sha256 << "\t11.3-test\r\n"
+                  << "F\t4096\r\n"
+                  << "E\t4100\tconditional_branch\t4104\r\n"
+                  << "E\t4104\tcall\t4128\r\n"
+                  << "E\t4110\treturn\t-\r\n";
+    }
+    nexusrev::compare_ghidra_reference(report, reference_path.string());
+    if (report.semantic_analysis.reference.status != "compared" || report.semantic_analysis.reference.difference_count != 0U) {
+        std::filesystem::remove(reference_path);
+        std::cerr << "matching Ghidra reference facts were reported as divergent\n"; return false;
+    }
+    {
+        std::ofstream reference(reference_path, std::ios::binary | std::ios::trunc);
+        reference << "NEXUSREV_GHIDRA_REFERENCE\t1\t" << report.input_sha256 << "\t11.3-test\n"
+                  << "F\t4097\nE\t4100\tconditional_branch\t4103\n";
+    }
+    nexusrev::compare_ghidra_reference(report, reference_path.string());
+    if (report.semantic_analysis.reference.status != "divergent" ||
+        report.semantic_analysis.reference.difference_count == 0U) {
+        std::cerr << "Ghidra reference disagreements were not exposed\n"; return false;
+    }
+    report.input_sha256 = std::string(64U, 'b');
+    {
+        std::ofstream reference(reference_path, std::ios::binary | std::ios::trunc);
+        reference << "NEXUSREV_GHIDRA_REFERENCE\t1\t" << std::string(64U, 'a') << "\t11.3-test\n";
+    }
+    nexusrev::compare_ghidra_reference(report, reference_path.string());
+    std::filesystem::remove(reference_path);
+    if (report.semantic_analysis.reference.status != "invalid") {
+        std::cerr << "unavailable or mismatched reference report was not marked invalid\n"; return false;
+    }
+
+    nexusrev::AnalysisReport indirect;
+    configure_pe(indirect);
+    auto indirect_jump = synthetic_instruction(0x1000U, "jmp", "ff e0");
+    indirect_jump.detail_operands = {reg_operand("rax", 1U)};
+    indirect.instructions.push_back(indirect_jump);
+    indirect.instructions.push_back(synthetic_instruction(0x1002U, "ret", "c3"));
+    function.start_rva = 0x1000U; function.end_rva = 0x1003U;
+    indirect.function_recovery.candidate_functions.push_back(function);
+    nexusrev::analyze_semantics(indirect);
+    if (indirect.semantic_analysis.functions[0].semantic_complete ||
+        indirect.semantic_analysis.functions[0].unresolved_control_flow_count == 0U ||
+        indirect.semantic_analysis.cfg_edges.empty() ||
+        indirect.semantic_analysis.cfg_edges[0].kind != "indirect_branch") {
+        std::cerr << "function with unknown indirect branch was incorrectly marked complete\n"; return false;
+    }
+    nexusrev::AnalysisReport unsupported_transfer;
+    configure_pe(unsupported_transfer);
+    auto loop = synthetic_instruction(0x1000U, "loopne", "e0 fe");
+    loop.detail_operands = {imm_operand(0x140001000ULL)};
+    unsupported_transfer.instructions.push_back(loop);
+    unsupported_transfer.instructions.push_back(synthetic_instruction(0x1002U, "ret", "c3"));
+    function.start_rva = 0x1000U; function.end_rva = 0x1003U; function.ambiguous = false;
+    unsupported_transfer.function_recovery.candidate_functions.push_back(function);
+    auto far_jump = synthetic_instruction(0x1100U, "ljmp", "ea 00 00 00 00 00 00");
+    far_jump.detail_operands = {imm_operand(0x140001100ULL)};
+    unsupported_transfer.instructions.push_back(far_jump);
+    unsupported_transfer.instructions.push_back(synthetic_instruction(0x1107U, "ret", "c3"));
+    function.start_rva = 0x1100U; function.end_rva = 0x1108U; function.label = "far-transfer";
+    unsupported_transfer.function_recovery.candidate_functions.push_back(function);
+    nexusrev::analyze_semantics(unsupported_transfer);
+    if (unsupported_transfer.semantic_analysis.instructions[0].control_flow != "unknown" ||
+        unsupported_transfer.semantic_analysis.instructions[2].control_flow != "unknown" ||
+        unsupported_transfer.semantic_analysis.cfg_edges.size() < 2U ||
+        unsupported_transfer.semantic_analysis.cfg_edges[0].kind != "unknown" ||
+        unsupported_transfer.semantic_analysis.cfg_edges[1].kind != "unknown" ||
+        unsupported_transfer.semantic_analysis.functions[0].semantic_complete ||
+        unsupported_transfer.semantic_analysis.functions[1].semantic_complete) {
+        std::cerr << "unsupported conditional/unconditional flow was incorrectly reduced to fallthrough\n"; return false;
+    }
+    nexusrev::AnalysisReport trailing_gap;
+    configure_pe(trailing_gap);
+    trailing_gap.instructions.push_back(synthetic_instruction(0x1000U, "ret", "c3"));
+    trailing_gap.decode_gaps.push_back({0U, 0x1001U, 0x140001001ULL, 0x201U, 3U, "90 90 90", "decoder_rejected"});
+    function.start_rva = 0x1000U; function.end_rva = 0x1004U;
+    trailing_gap.function_recovery.candidate_functions.push_back(function);
+    nexusrev::analyze_semantics(trailing_gap);
+    if (trailing_gap.semantic_analysis.functions[0].semantic_complete ||
+        !has(trailing_gap.semantic_analysis.functions[0].issues, "decode_gap_intersects_function")) {
+        std::cerr << "function with a trailing in-range decode gap was incorrectly marked complete\n"; return false;
+    }
+    nexusrev::AnalysisReport external_call;
+    configure_pe(external_call);
+    auto call = synthetic_instruction(0x1000U, "call", "e8 00 00 00 00");
+    call.detail_operands = {imm_operand(0x140005000ULL)};
+    external_call.instructions.push_back(call);
+    external_call.instructions.push_back(synthetic_instruction(0x1005U, "ret", "c3"));
+    function.start_rva = 0x1000U; function.end_rva = 0x1006U;
+    external_call.function_recovery.candidate_functions.push_back(function);
+    nexusrev::analyze_semantics(external_call);
+    if (external_call.semantic_analysis.instructions[0].control_flow != "direct_call" ||
+        external_call.semantic_analysis.call_graph.empty() ||
+        external_call.semantic_analysis.call_graph[0].resolution != "unresolved_direct_target" ||
+        external_call.semantic_analysis.cfg_edges.empty() || external_call.semantic_analysis.cfg_edges[0].kind != "call") {
+        std::cerr << "direct call outside the image was mislabeled as an indirect call\n"; return false;
+    }
+    nexusrev::AnalysisReport ambiguous;
+    configure_pe(ambiguous);
+    ambiguous.instructions.push_back(synthetic_instruction(0x1000U, "ret", "c3"));
+    function.start_rva = 0x1000U; function.end_rva = 0x1001U; function.ambiguous = true;
+    ambiguous.function_recovery.candidate_functions.push_back(function);
+    nexusrev::analyze_semantics(ambiguous);
+    if (ambiguous.semantic_analysis.functions[0].semantic_complete ||
+        !ambiguous.semantic_analysis.functions[0].boundary_ambiguous ||
+        !has(ambiguous.semantic_analysis.functions[0].issues, "function_boundary_ambiguous")) {
+        std::cerr << "ambiguous function boundary was incorrectly marked semantically complete\n"; return false;
+    }
+    return true;
+}
 }
 
 int main() {
@@ -101,7 +386,7 @@ int main() {
         std::cerr << "SHA-256 abc test failed\n";
         return 1;
     }
-    if (!pe_parser_tests()) return 1;
-    std::cout << "SHA-256 and PE parser unit tests passed\n";
+    if (!pe_parser_tests() || !semantic_operation_tests() || !cfg_and_reference_tests()) return 1;
+    std::cout << "SHA-256, PE parser, Phase 3 semantic, CFG, and Ghidra-reference tests passed\n";
     return 0;
 }

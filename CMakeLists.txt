@@ -16,6 +16,7 @@ add_executable(nexusrev
     src/main.cpp
     src/phase1.cpp
     src/phase2.cpp
+    src/phase3.cpp
     src/pe_image.cpp
     src/sha256.cpp
 )
@@ -50,10 +51,12 @@ nexusrev_apply_build_options(nexusrev)
 enable_testing()
 add_executable(nexusrev_unit_tests
     tests/unit_tests.cpp
+    src/phase3.cpp
     src/pe_image.cpp
     src/sha256.cpp
 )
 target_include_directories(nexusrev_unit_tests PRIVATE include)
+target_link_libraries(nexusrev_unit_tests PRIVATE capstone::capstone)
 nexusrev_apply_build_options(nexusrev_unit_tests)
 add_test(NAME nexusrev_unit_tests COMMAND nexusrev_unit_tests)
 

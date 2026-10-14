@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Phase 1/2 CLI acceptance tests over deterministic PE and PDB fixtures."""
+"""CLI acceptance tests over deterministic PE and PDB fixtures."""
 
 import argparse
 import hashlib
 import json
+import jsonschema
 import pathlib
 import subprocess
 import sys
@@ -20,6 +21,16 @@ def run(program, *arguments):
     )
 
 
+def validate_report(report, validator):
+    errors = list(validator.iter_errors(report))
+    if errors:
+        details = "\n".join(
+            f"{'/'.join(map(str, error.absolute_path))}: {error.message}"
+            for error in errors[:10]
+        )
+        raise AssertionError(f"analysis report does not conform to schema:\n{details}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--program", required=True, type=pathlib.Path)
@@ -31,7 +42,9 @@ def main():
     args = parser.parse_args()
 
     schema = json.loads(args.schema.read_text(encoding="utf-8"))
-    assert schema["properties"]["schema_version"]["const"] == 3
+    jsonschema.Draft202012Validator.check_schema(schema)
+    report_validator = jsonschema.Draft202012Validator(schema)
+    assert schema["properties"]["schema_version"]["const"] == 4
     help_result = run(args.program, "--help")
     assert help_result.returncode == 0, help_result.stderr
     assert "not original source code" in help_result.stdout
@@ -85,17 +98,18 @@ def main():
         report_path = pathlib.Path(str(valid_output) + ".report.json")
         assert report_path.is_file()
         report = json.loads(report_path.read_text(encoding="utf-8"))
-        assert report["schema_version"] == 3
+        validate_report(report, report_validator)
+        assert report["schema_version"] == 4
         assert report["status"] == "partial"
         assert report["run"] == {
             "start_status": "running",
             "end_status": "partial",
             "exit_code": 0,
         }
-        assert report["tool"]["configuration_version"] == 2
+        assert report["tool"]["configuration_version"] == 3
         assert report["input"]["sha256"] == fixture_hash
         assert [stage["name"] for stage in report["stages"]] == [
-            "parse", "analysis", "symbol_provider", "function_recovery", "emission"
+            "parse", "analysis", "symbol_provider", "function_recovery", "semantic_analysis", "emission"
         ]
         assert all(
             stage["status"] in {"complete", "partial", "unsupported", "failed"}
@@ -110,6 +124,39 @@ def main():
         assert report["decode"]["instructions"]
         assert report["symbols"]["status"] == "not_present"
         assert report["function_recovery"]["candidate_functions"]
+        assert report["semantic_analysis"]["status"] in {"partial", "complete"}
+        assert report["semantic_analysis"]["instructions"]
+        assert report["semantic_analysis"]["reference"]["status"] == "not_configured"
+        ghidra_tsv = root / "ghidra-reference.tsv"
+        with ghidra_tsv.open("w", encoding="utf-8") as reference:
+            reference.write(f"NEXUSREV_GHIDRA_REFERENCE\t1\t{report['input']['sha256']}\tunit-test\n")
+            for group in ("known_functions", "candidate_functions", "fragments"):
+                for function in report["function_recovery"][group]:
+                    reference.write(f"F\t{function['start_rva']}\n")
+            flow_kinds = {
+                "direct_call": "call", "conditional_branch": "conditional_branch",
+                "direct_branch": "branch", "indirect_branch": "indirect_branch", "return": "return",
+            }
+            for instruction in report["semantic_analysis"]["instructions"]:
+                kind = flow_kinds.get(instruction["control_flow"])
+                if kind:
+                    target = instruction["target_rva"]
+                    reference.write(f"E\t{instruction['rva']}\t{kind}\t{target if target is not None else '-'}\n")
+        referenced_output = root / "referenced.disasm"
+        referenced_result = run(args.program, "--reference-report", ghidra_tsv, args.fixture, referenced_output)
+        assert referenced_result.returncode == 0, referenced_result.stderr
+        referenced_report = json.loads(pathlib.Path(str(referenced_output) + ".report.json").read_text(encoding="utf-8"))
+        assert referenced_report["semantic_analysis"]["reference"]["status"] == "compared"
+        assert referenced_report["semantic_analysis"]["reference"]["difference_count"] == 0
+
+        mismatched_tsv = root / "ghidra-mismatched.tsv"
+        mismatched_tsv.write_text("NEXUSREV_GHIDRA_REFERENCE\t1\t" + "0" * 64 + "\tunit-test\n", encoding="utf-8")
+        mismatched_output = root / "reference-mismatch.disasm"
+        mismatched_result = run(args.program, "--reference-report", mismatched_tsv, args.fixture, mismatched_output)
+        assert mismatched_result.returncode == 0, mismatched_result.stderr
+        mismatched_report = json.loads(pathlib.Path(str(mismatched_output) + ".report.json").read_text(encoding="utf-8"))
+        assert mismatched_report["semantic_analysis"]["reference"]["status"] == "invalid"
+        assert any(item["code"] == "GHIDRA_REFERENCE_INPUT_MISMATCH" for item in mismatched_report["diagnostics"])
         output_text = valid_output.read_text(encoding="utf-8")
         assert "not original source code" in output_text
         assert "RVA=0x" in output_text and "FILE=0x" in output_text
@@ -152,6 +199,7 @@ def main():
         compiler_result = run(args.program, args.compiler_fixture, compiler_output)
         assert compiler_result.returncode == 0, compiler_result.stderr
         compiler_report = json.loads(pathlib.Path(str(compiler_output) + ".report.json").read_text(encoding="utf-8"))
+        validate_report(compiler_report, report_validator)
         compiled_pe = compiler_report["pe"]
         assert compiled_pe["machine_name"] == "AMD64"
         assert compiled_pe["entry_point"]["rva"] == 0x1010
@@ -175,6 +223,22 @@ def main():
         assert first_detail["operands"][1]["type"] == "memory"
         assert first_detail["operands"][1]["base"] == "rcx"
         assert first_detail["operands"][1]["index"] == "rdx"
+
+        ghidra_reference = args.compiler_fixture.with_name("compiler-generated-x64-ghidra-11.3.2.tsv")
+        assert ghidra_reference.is_file()
+        ghidra_output = root / "ghidra-reference.disasm"
+        ghidra_result = run(args.program, "--reference-report", ghidra_reference,
+                            args.compiler_fixture, ghidra_output)
+        assert ghidra_result.returncode == 0, ghidra_result.stderr
+        ghidra_report = json.loads(pathlib.Path(str(ghidra_output) + ".report.json").read_text(encoding="utf-8"))
+        validate_report(ghidra_report, report_validator)
+        ghidra_comparison = ghidra_report["semantic_analysis"]["reference"]
+        assert ghidra_comparison["status"] == "compared"
+        assert ghidra_comparison["tool"] == "Ghidra"
+        assert ghidra_comparison["version"] == "11.3.2"
+        assert ghidra_comparison["reference_function_count"] == 2
+        assert ghidra_comparison["compared_flow_count"] == 2
+        assert ghidra_comparison["difference_count"] == 0
 
         pdb_dll = args.phase2_fixtures / "pdb-sample.dll"
         pdb_output = root / "pdb-backed.disasm"

@@ -1,4 +1,5 @@
 #include "nexusrev.hpp"
+#include "phase3.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -28,15 +29,17 @@ struct CliOptions {
     std::string output_path;
     std::string report_path;
     std::string pdb_path;
+    std::string reference_report_path;
     std::string format = "disassembly";
 };
 
 void print_usage(std::ostream& output, const char* executable) {
     output << "Usage: " << executable
-           << " [--format disassembly] [--report-json <path>] [--pdb <matching.pdb>] <input.exe> <output>\n"
+           << " [--format disassembly] [--report-json <path>] [--pdb <matching.pdb>] [--reference-report <ghidra.tsv>] <input.exe> <output>\n"
            << "       " << executable << " --help\n\n"
            << "The two-path form is the compatibility mode. Native PE32+ x86-64 receives bounded decode and function-boundary analysis.\n"
            << "A PDB is used only when its GUID and age match the PE CodeView identity; otherwise it is reported and ignored.\n"
+           << "An optional Ghidra headless reference TSV can be supplied with --reference-report for differential checks.\n"
            << "Output is annotated disassembly, not original source code or guaranteed compilable C/C++.\n"
            << "Unsupported architectures and CLR/.NET images are identified, not decoded as x64. A JSON report is\n"
            << "written to <output>.report.json unless --report-json is specified.\n";
@@ -86,6 +89,14 @@ bool parse_arguments(int argc, char** argv, CliOptions& options, bool& show_help
             options.pdb_path = argv[++index];
             continue;
         }
+        if (argument == "--reference-report") {
+            if (index + 1 >= argc) {
+                error = "--reference-report requires a path";
+                return false;
+            }
+            options.reference_report_path = argv[++index];
+            continue;
+        }
         if (argument.rfind("--", 0) == 0) {
             error = "unknown option: " + argument;
             return false;
@@ -117,6 +128,12 @@ bool parse_arguments(int argc, char** argv, CliOptions& options, bool& show_help
         (normalized_absolute_path(options.output_path) == normalized_absolute_path(options.pdb_path) ||
          normalized_absolute_path(options.report_path) == normalized_absolute_path(options.pdb_path))) {
         error = "output and report paths must not overwrite the supplied PDB";
+        return false;
+    }
+    if (!options.reference_report_path.empty() &&
+        (normalized_absolute_path(options.output_path) == normalized_absolute_path(options.reference_report_path) ||
+         normalized_absolute_path(options.report_path) == normalized_absolute_path(options.reference_report_path))) {
+        error = "output paths must not overwrite the supplied Ghidra reference report";
         return false;
     }
     return true;
@@ -232,6 +249,8 @@ int main(int argc, char** argv) {
             print_diagnostics(report);
             return kAnalysisFailure;
         }
+        if (!options.reference_report_path.empty())
+            nexusrev::compare_ghidra_reference(report, options.reference_report_path);
 
         report.stages.push_back({"emission", "complete"});
         report.artifacts = {options.output_path, options.report_path};

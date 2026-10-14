@@ -13,6 +13,7 @@
 
 #include "sha256.hpp"
 #include "phase2.hpp"
+#include "phase3.hpp"
 
 #ifndef NEXUSREV_VERSION
 #define NEXUSREV_VERSION "0.1.0"
@@ -374,7 +375,7 @@ void decode_sections(AnalysisReport& report, csh handle) {
         diagnostic(report, "DECODE_GAPS_PRESENT", "warning", "some executable bytes were rejected by the decoder; exact intervals and byte values are reported");
     if (report.decode.executable_zero_fill_bytes != 0U)
         diagnostic(report, "EXECUTABLE_ZERO_FILL_PRESENT", "info", "virtual zero-fill has no source-file bytes and was not decoded");
-    diagnostic(report, "SEMANTIC_LIFTING_NOT_IMPLEMENTED", "info", "Phase 2 reports evidence-backed function candidates; semantic lifting and source-level decompilation remain out of scope");
+    diagnostic(report, "SEMANTIC_ANALYSIS_BOUNDED", "info", "Phase 3 emits conservative x86-64 semantic IR and control-flow evidence; unsupported instructions and unresolved flow remain explicit, and source-level reconstruction is not claimed");
     report.stages.push_back({"analysis", "partial"});
     report.status = "partial";
 }
@@ -592,7 +593,8 @@ std::string make_json(const AnalysisReport& r) {
       << ",\"candidate_function_count\":" << r.function_recovery.candidate_functions.size()
       << ",\"fragment_count\":" << r.function_recovery.fragments.size()
       << ",\"bounded_range_count\":" << bounded << ",\"ambiguous_range_count\":" << ambiguous
-      << ",\"unresolved_range_count\":" << r.function_recovery.unresolved_ranges.size() << "}},\n  \"stages\":[";
+      << ",\"unresolved_range_count\":" << r.function_recovery.unresolved_ranges.size() << "}},\n  \"semantic_analysis\":"
+      << semantic_analysis_to_json(r.semantic_analysis) << ",\n  \"stages\":[";
     for (std::size_t i=0; i<r.stages.size(); ++i) o << (i?",":"") << "{\"name\":\"" << escape_json(r.stages[i].name) << "\",\"status\":\"" << escape_json(r.stages[i].status) << "\"}";
     o << "],\n  \"diagnostics\":[";
     for (std::size_t i=0; i<r.diagnostics.size(); ++i) { const auto& d=r.diagnostics[i]; o << (i?",":"") << "{\"code\":\"" << escape_json(d.code)
@@ -647,11 +649,13 @@ bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path) {
         report.stages.push_back({"analysis", "unsupported"}); report.status = "unsupported";
         if (image_.clr.present) diagnostic(report, "MANAGED_CLR_UNSUPPORTED", "warning", "CLR/.NET images are identified but not analyzed as native x86-64");
         else diagnostic(report, "ARCHITECTURE_UNSUPPORTED", "warning", "only native PE32+ x86-64 images are analyzed");
+        analyze_semantics(report);
         return true;
     }
     if (image_.clr.present) {
         report.stages.push_back({"analysis", "unsupported"}); report.status = "unsupported";
         diagnostic(report, "MANAGED_CLR_UNSUPPORTED", "warning", "CLR/.NET images are identified but not analyzed as native x86-64");
+        analyze_semantics(report);
         return true;
     }
     if (cs_open(CS_ARCH_X86, CS_MODE_64, &capstone_handle_) != CS_ERR_OK) {
@@ -663,7 +667,10 @@ bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path) {
         diagnostic(report, "DECODER_DETAIL_FAILED", "error", "unable to enable Capstone instruction details"); return false;
     }
     decode_sections(report, capstone_handle_);
-    if (report.status != "failed") recover_functions(report, pdb_path);
+    if (report.status != "failed") {
+        recover_functions(report, pdb_path);
+        analyze_semantics(report);
+    }
     return report.status != "failed";
 }
 
