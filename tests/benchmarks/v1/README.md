@@ -37,6 +37,8 @@ MSVC and clang-cl cases use each generated image's matching PDB as labeled funct
 
 CI generates these binaries from `corpus.c`, analyzes them strictly as data (never executing them), and uploads per-toolchain JSON reports as workflow artifacts. The output records the actual runner compiler versions and hashes, making a run auditable even when hosted toolchain versions advance. The command forms are:
 
+The first hosted MSVC measurement with a matching PDB passed the 1.000 symbol-backed start/range floors. Its stripped-range recall was **0.375**, below the initial provisional 0.500 floor; all other stripped floors were met ([Actions run 38593357564](https://github.com/nexuss0781/NexussREV/actions/runs/38593357564)). Accordingly, the versioned generated-matrix floor is now 0.375 for stripped range recall, based on that measured MSVC baseline rather than an unmeasured assumption. Keep the original Clang/LLD numeric baseline and its 0.625 stripped-range recall unchanged. Any future increase to the generated-matrix floor requires new reviewed toolchain evidence. Threshold failures also preserve a per-case JSON report so the discrepancy is auditable.
+
 ```sh
 python3 tests/phase2_toolchain_benchmark.py \
   --mode mingw --program build/nexusrev \

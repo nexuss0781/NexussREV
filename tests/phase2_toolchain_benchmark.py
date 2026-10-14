@@ -328,7 +328,32 @@ def main():
             for threshold_name, threshold in threshold_set[metric_name].items():
                 value_name = threshold_name.removeprefix("min_")
                 if actual[value_name] + 1e-12 < threshold:
-                    raise SystemExit(f"{args.mode} {category} {metric_name} {value_name}={actual[value_name]:.3f} < {threshold:.3f}")
+                    failure_report = output.with_name(output.stem + "-threshold-failure.json")
+                    failure_report.write_text(json.dumps({
+                        "matrix_version": matrix["format_version"],
+                        "compiler_mode": args.mode,
+                        "compiler": toolchain["compiler"],
+                        "linker": toolchain["linker"],
+                        "truth_source": toolchain["truth_source"],
+                        "compiler_version": compiler_version,
+                        "linker_version": linker_version,
+                        "source_sha256": observed_source_hash,
+                        "fixture_source": matrix["source"],
+                        "case_count": len(results),
+                        "grouped_metrics": grouped_metrics,
+                        "cases": results,
+                        "threshold_failure": {
+                            "evidence_class": category,
+                            "metric": metric_name,
+                            "value": value_name,
+                            "observed": actual[value_name],
+                            "minimum": threshold,
+                        },
+                    }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                    raise SystemExit(
+                        f"{args.mode} {category} {metric_name} {value_name}={actual[value_name]:.3f} "
+                        f"< {threshold:.3f}; detailed report={failure_report}"
+                    )
     report = {
         "matrix_version": matrix["format_version"],
         "compiler_mode": args.mode,

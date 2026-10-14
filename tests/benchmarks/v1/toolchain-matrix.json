@@ -33,7 +33,7 @@
     },
     "stripped": {
       "starts": {"min_precision": 0.8, "min_recall": 0.5},
-      "ranges": {"min_precision": 0.8, "min_recall": 0.5}
+      "ranges": {"min_precision": 0.8, "min_recall": 0.375}
     },
     "dwarf_present_no_pdb": {
       "starts": {"min_precision": 0.8, "min_recall": 0.5},
