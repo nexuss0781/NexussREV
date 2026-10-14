@@ -349,7 +349,7 @@
     },
     "dataflowAnalysis": {
       "type": "object", "additionalProperties": false,
-      "required": ["status", "backend", "abi", "stack_frames", "signatures", "call_argument_flows", "imported_calls", "control_structures", "limitations"],
+      "required": ["status", "backend", "abi", "stack_frames", "signatures", "call_argument_flows", "imported_calls", "control_structures", "rtti_vtables", "limitations"],
       "properties": {
         "status": { "$ref": "#/$defs/stageStatus" }, "backend": { "type": "string" }, "abi": { "type": "string" },
         "stack_frames": { "type": "array", "items": { "$ref": "#/$defs/stackFrame" } },
@@ -357,6 +357,7 @@
         "call_argument_flows": { "type": "array", "items": { "$ref": "#/$defs/callArgumentFlow" } },
         "imported_calls": { "type": "array", "items": { "$ref": "#/$defs/importedCall" } },
         "control_structures": { "type": "array", "items": { "$ref": "#/$defs/controlStructure" } },
+        "rtti_vtables": { "type": "array", "items": { "$ref": "#/$defs/rttiVtable" } },
         "limitations": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     },
@@ -408,13 +409,15 @@
     },
     "callArgumentFlow": {
       "type": "object", "additionalProperties": false,
-      "required": ["caller_start_rva", "call_rva", "target_rva", "callee", "parameter_index", "argument_register", "source_kind", "source_description", "source_rva", "confidence", "evidence"],
+      "required": ["caller_start_rva", "call_rva", "target_rva", "callee", "parameter_index", "argument_register", "source_kind", "source_description", "source_rva", "argument_type", "type_status", "type_confidence", "confidence", "evidence"],
       "properties": {
         "caller_start_rva": { "type": "integer", "minimum": 0 }, "call_rva": { "type": "integer", "minimum": 0 },
         "target_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
         "callee": { "type": "string" }, "parameter_index": { "type": "integer", "minimum": 0 },
         "argument_register": { "type": "string" }, "source_kind": { "type": "string" }, "source_description": { "type": "string" },
         "source_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "argument_type": { "type": "string" }, "type_status": { "enum": ["unknown", "observed", "inferred", "catalogued"] },
+        "type_confidence": { "type": "number", "minimum": 0, "maximum": 1 },
         "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
         "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } }
       }
@@ -441,6 +444,21 @@
         "join_block": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
         "block_ids": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
         "confidence": { "type": "number", "minimum": 0, "maximum": 1 }, "reason": { "type": "string" },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } }
+      }
+    },
+    "rttiVtable": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type_name", "type_descriptor_rva", "complete_object_locator_rva", "class_hierarchy_descriptor_rva", "vtable_rva", "base_type_names", "virtual_method_rvas", "confidence", "evidence"],
+      "properties": {
+        "type_name": { "type": "string", "minLength": 1 },
+        "type_descriptor_rva": { "type": "integer", "minimum": 0 },
+        "complete_object_locator_rva": { "type": "integer", "minimum": 0 },
+        "class_hierarchy_descriptor_rva": { "type": "integer", "minimum": 0 },
+        "vtable_rva": { "type": "integer", "minimum": 0 },
+        "base_type_names": { "type": "array", "items": { "type": "string" } },
+        "virtual_method_rvas": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
         "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } }
       }
     },

@@ -319,6 +319,9 @@ struct CallArgumentFlowRecord {
     std::string source_kind = "unknown";
     std::string source_description;
     std::optional<std::uint32_t> source_rva;
+    std::string argument_type = "unknown";
+    std::string type_status = "unknown";
+    double type_confidence = 0.0;
     double confidence = 0.0;
     std::vector<Phase4Evidence> evidence;
 };
@@ -349,6 +352,18 @@ struct ControlStructureRecord {
     std::vector<Phase4Evidence> evidence;
 };
 
+struct RttiVtableRecord {
+    std::string type_name;
+    std::uint32_t type_descriptor_rva = 0;
+    std::uint32_t complete_object_locator_rva = 0;
+    std::uint32_t class_hierarchy_descriptor_rva = 0;
+    std::uint32_t vtable_rva = 0;
+    std::vector<std::string> base_type_names;
+    std::vector<std::uint32_t> virtual_method_rvas;
+    double confidence = 0.0;
+    std::vector<Phase4Evidence> evidence;
+};
+
 struct Phase4AnalysisRecord {
     std::string status = "partial";
     std::string backend = "nexusrev-x64-microsoft-abi-phase4-v1";
@@ -358,6 +373,7 @@ struct Phase4AnalysisRecord {
     std::vector<CallArgumentFlowRecord> call_argument_flows;
     std::vector<ImportedCallRecord> imported_calls;
     std::vector<ControlStructureRecord> control_structures;
+    std::vector<RttiVtableRecord> rtti_vtables;
     std::vector<std::string> limitations;
 };
 

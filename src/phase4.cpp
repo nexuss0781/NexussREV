@@ -750,6 +750,215 @@ std::string instruction_pseudocode(const InstructionRecord& insn,
     return "unsupported_instruction(\"" + insn.mnemonic + "\");";
 }
 
+bool read_u32_le(const std::vector<std::uint8_t>& bytes, std::size_t offset, std::uint32_t& value) {
+    if (offset > bytes.size() || bytes.size() - offset < 4U) return false;
+    value = static_cast<std::uint32_t>(bytes[offset]) |
+        (static_cast<std::uint32_t>(bytes[offset + 1U]) << 8U) |
+        (static_cast<std::uint32_t>(bytes[offset + 2U]) << 16U) |
+        (static_cast<std::uint32_t>(bytes[offset + 3U]) << 24U);
+    return true;
+}
+
+bool read_u64_le(const std::vector<std::uint8_t>& bytes, std::size_t offset, std::uint64_t& value) {
+    if (offset > bytes.size() || bytes.size() - offset < 8U) return false;
+    value = 0U;
+    for (std::size_t i = 0; i < 8U; ++i) value |= static_cast<std::uint64_t>(bytes[offset + i]) << (i * 8U);
+    return true;
+}
+
+bool is_file_backed_data_rva(const PeImage& image, std::uint32_t rva) {
+    const auto mapping = image.map_rva(rva);
+    return mapping.mapped && !mapping.virtual_zero_fill && mapping.section_index >= 0 &&
+        static_cast<std::size_t>(mapping.section_index) < image.sections.size() &&
+        !image.sections[static_cast<std::size_t>(mapping.section_index)].executable;
+}
+
+bool is_file_backed_code_rva(const PeImage& image, std::uint32_t rva) {
+    for (const auto& section : image.sections) {
+        if (!section.executable || rva < section.virtual_address) continue;
+        const std::uint64_t delta = static_cast<std::uint64_t>(rva) - section.virtual_address;
+        if (delta < section.file_backed_size) return true;
+    }
+    return false;
+}
+
+bool read_msvc_type_name(const PeImage& image, std::uint32_t type_descriptor_rva, std::string& type_name) {
+    if (!is_file_backed_data_rva(image, type_descriptor_rva) ||
+        type_descriptor_rva > std::numeric_limits<std::uint32_t>::max() - 272U) return false;
+    std::vector<std::uint8_t> header;
+    if (!image.read_rva(type_descriptor_rva, 16U, header)) return false;
+    std::string mangled;
+    bool terminated = false;
+    for (std::uint32_t i = 0; i < 256U; ++i) {
+        std::vector<std::uint8_t> character;
+        if (!image.read_rva(type_descriptor_rva + 16U + i, 1U, character)) return false;
+        if (character[0] == 0U) { terminated = true; break; }
+        mangled.push_back(static_cast<char>(character[0]));
+    }
+    if (!terminated || (mangled.rfind(".?AV", 0U) != 0U && mangled.rfind(".?AU", 0U) != 0U) || mangled.size() < 6U)
+        return false;
+    std::string body = mangled.substr(4U);
+    if (body.size() >= 2U && body.compare(body.size() - 2U, 2U, "@@") == 0) body.resize(body.size() - 2U);
+    std::vector<std::string> components;
+    std::size_t begin = 0U;
+    while (begin <= body.size()) {
+        const std::size_t end = body.find('@', begin);
+        const auto part = body.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+        if (!part.empty()) components.push_back(part);
+        if (end == std::string::npos) break;
+        begin = end + 1U;
+    }
+    if (components.empty()) return false;
+    std::reverse(components.begin(), components.end());
+    std::ostringstream display;
+    for (std::size_t i = 0; i < components.size(); ++i) {
+        if (i) display << "::";
+        for (const unsigned char c : components[i])
+            display << (std::isalnum(c) || c == '_' ? static_cast<char>(c) : '_');
+    }
+    type_name = display.str();
+    return !type_name.empty();
+}
+
+struct ScannedDataSection {
+    std::uint32_t start_rva = 0;
+    std::vector<std::uint8_t> bytes;
+};
+
+struct MsvcRttiCandidate {
+    std::string type_name;
+    std::uint32_t type_descriptor_rva = 0;
+    std::uint32_t locator_rva = 0;
+    std::uint32_t hierarchy_rva = 0;
+    std::vector<std::string> base_type_names;
+};
+
+void recover_msvc_rtti_vtables(const PeImage& image, Phase4AnalysisRecord& output) {
+    constexpr std::uint64_t kMaxRttiScanBytes = 32ULL * 1024ULL * 1024ULL;
+    constexpr std::size_t kMaxRttiCandidates = 256U;
+    constexpr std::size_t kMaxVirtualMethods = 64U;
+    std::vector<ScannedDataSection> data_sections;
+    std::uint64_t remaining = kMaxRttiScanBytes;
+    bool scan_was_bounded = false;
+    for (const auto& section : image.sections) {
+        if (section.executable || section.file_backed_size == 0U || remaining == 0U) continue;
+        const std::uint64_t take64 = std::min(section.file_backed_size, remaining);
+        if (take64 > std::numeric_limits<std::size_t>::max()) { scan_was_bounded = true; break; }
+        ScannedDataSection scanned;
+        scanned.start_rva = section.virtual_address;
+        if (!image.read_rva(section.virtual_address, static_cast<std::size_t>(take64), scanned.bytes)) {
+            output.limitations.push_back("an RTTI candidate data section could not be completely read as file-backed bytes");
+            continue;
+        }
+        data_sections.push_back(std::move(scanned));
+        remaining -= take64;
+        if (take64 < section.file_backed_size) { scan_was_bounded = true; break; }
+    }
+    if (scan_was_bounded) output.limitations.push_back("MSVC RTTI discovery stopped at the 32-MiB non-executable data scan bound");
+
+    std::vector<MsvcRttiCandidate> candidates;
+    std::set<std::uint32_t> seen_locators;
+    for (const auto& section : data_sections) {
+        for (std::size_t offset = 0U; offset + 24U <= section.bytes.size(); offset += 4U) {
+            if (section.start_rva > std::numeric_limits<std::uint32_t>::max() - offset) break;
+            const auto locator_rva = static_cast<std::uint32_t>(section.start_rva + offset);
+            std::uint32_t signature = 0, type_descriptor = 0, hierarchy = 0, self = 0;
+            if (!read_u32_le(section.bytes, offset, signature) || signature != 1U ||
+                !read_u32_le(section.bytes, offset + 12U, type_descriptor) ||
+                !read_u32_le(section.bytes, offset + 16U, hierarchy) ||
+                !read_u32_le(section.bytes, offset + 20U, self) || self != locator_rva ||
+                seen_locators.count(locator_rva) || !is_file_backed_data_rva(image, hierarchy)) continue;
+            std::string type_name;
+            if (!read_msvc_type_name(image, type_descriptor, type_name)) continue;
+            std::vector<std::uint8_t> hierarchy_bytes;
+            if (!image.read_rva(hierarchy, 16U, hierarchy_bytes)) continue;
+            std::uint32_t hierarchy_signature = 0, base_count = 0, base_array_rva = 0;
+            if (!read_u32_le(hierarchy_bytes, 0U, hierarchy_signature) || hierarchy_signature != 0U ||
+                !read_u32_le(hierarchy_bytes, 8U, base_count) || base_count == 0U || base_count > 64U ||
+                !read_u32_le(hierarchy_bytes, 12U, base_array_rva) || !is_file_backed_data_rva(image, base_array_rva)) continue;
+            std::vector<std::uint8_t> base_array;
+            if (!image.read_rva(base_array_rva, static_cast<std::size_t>(base_count) * 4U, base_array)) continue;
+            MsvcRttiCandidate candidate;
+            candidate.type_name = std::move(type_name);
+            candidate.type_descriptor_rva = type_descriptor;
+            candidate.locator_rva = locator_rva;
+            candidate.hierarchy_rva = hierarchy;
+            for (std::uint32_t i = 0; i < base_count; ++i) {
+                std::uint32_t base_descriptor = 0, base_type = 0;
+                if (!read_u32_le(base_array, static_cast<std::size_t>(i) * 4U, base_descriptor) ||
+                    !is_file_backed_data_rva(image, base_descriptor)) continue;
+                std::vector<std::uint8_t> base_record;
+                if (!image.read_rva(base_descriptor, 4U, base_record) || !read_u32_le(base_record, 0U, base_type)) continue;
+                std::string base_name;
+                if (read_msvc_type_name(image, base_type, base_name) && base_name != candidate.type_name &&
+                    std::find(candidate.base_type_names.begin(), candidate.base_type_names.end(), base_name) == candidate.base_type_names.end())
+                    candidate.base_type_names.push_back(std::move(base_name));
+            }
+            seen_locators.insert(locator_rva);
+            candidates.push_back(std::move(candidate));
+            if (candidates.size() >= kMaxRttiCandidates) {
+                output.limitations.push_back("MSVC RTTI candidates stopped at the 256-record bound");
+                break;
+            }
+        }
+        if (candidates.size() >= kMaxRttiCandidates) break;
+    }
+
+    std::set<std::pair<std::uint32_t, std::uint32_t>> emitted;
+    for (const auto& candidate : candidates) {
+        bool found_vtable = false;
+        for (const auto& section : data_sections) {
+            for (std::size_t offset = 0U; offset + 16U <= section.bytes.size(); offset += 8U) {
+                if (section.start_rva > std::numeric_limits<std::uint32_t>::max() - offset - 8U) break;
+                std::uint64_t preceding = 0;
+                if (!read_u64_le(section.bytes, offset, preceding) ||
+                    preceding != image.image_base + candidate.locator_rva) continue;
+                const auto vtable_rva = static_cast<std::uint32_t>(section.start_rva + offset + 8U);
+                RttiVtableRecord record;
+                record.type_name = candidate.type_name;
+                record.type_descriptor_rva = candidate.type_descriptor_rva;
+                record.complete_object_locator_rva = candidate.locator_rva;
+                record.class_hierarchy_descriptor_rva = candidate.hierarchy_rva;
+                record.vtable_rva = vtable_rva;
+                record.base_type_names = candidate.base_type_names;
+                for (std::size_t method_index = 0; method_index < kMaxVirtualMethods &&
+                     offset + 8U + (method_index + 1U) * 8U <= section.bytes.size(); ++method_index) {
+                    std::uint64_t method_va = 0;
+                    const std::size_t method_offset = offset + 8U + method_index * 8U;
+                    std::uint32_t method_rva = 0;
+                    if (!read_u64_le(section.bytes, method_offset, method_va) ||
+                        !image.va_to_rva(method_va, method_rva) || !is_file_backed_code_rva(image, method_rva)) break;
+                    record.virtual_method_rvas.push_back(method_rva);
+                }
+                if (record.virtual_method_rvas.empty() || !emitted.emplace(candidate.locator_rva, vtable_rva).second) continue;
+                found_vtable = true;
+                record.confidence = 0.93;
+                record.evidence.push_back({"msvc_x64_rtti_col_type_descriptor_hierarchy",
+                    "self-relative Complete Object Locator matches a bounded TypeDescriptor and Class Hierarchy Descriptor", 0.93});
+                record.evidence.push_back({"vftable[-1]_col_and_executable_slots",
+                    "an aligned data pointer immediately before this vtable targets the locator and its first contiguous slots target executable file-backed RVAs", 0.93});
+                output.rtti_vtables.push_back(std::move(record));
+                if (output.rtti_vtables.size() >= kMaxRttiCandidates) {
+                    output.limitations.push_back("RTTI/vtable output stopped at the 256-record bound");
+                    return;
+                }
+            }
+        }
+        if (!found_vtable && output.rtti_vtables.size() < kMaxRttiCandidates) {
+            RttiVtableRecord record;
+            record.type_name = candidate.type_name;
+            record.type_descriptor_rva = candidate.type_descriptor_rva;
+            record.complete_object_locator_rva = candidate.locator_rva;
+            record.class_hierarchy_descriptor_rva = candidate.hierarchy_rva;
+            record.base_type_names = candidate.base_type_names;
+            record.confidence = 0.76;
+            record.evidence.push_back({"msvc_x64_rtti_col_type_descriptor_hierarchy",
+                "self-relative Complete Object Locator matches a bounded TypeDescriptor and Class Hierarchy Descriptor; no vftable[-1] reference with executable slots was found", 0.76});
+            output.rtti_vtables.push_back(std::move(record));
+        }
+    }
+}
+
 } // namespace
 
 void analyze_phase4(AnalysisReport& report) {
@@ -761,6 +970,7 @@ void analyze_phase4(AnalysisReport& report) {
         report.stages.push_back({"dataflow_analysis", "unsupported"});
         return;
     }
+    recover_msvc_rtti_vtables(report.pe, result);
     std::map<std::uint32_t, const InstructionRecord*> decoded;
     for (const auto& insn : report.instructions) decoded.emplace(insn.rva, &insn);
     std::vector<FunctionView> views;
@@ -914,6 +1124,14 @@ void analyze_phase4(AnalysisReport& report) {
                         record.parameter_types = prototype->parameters;
                         record.prototype_source = "windows_sdk_prototype_catalog_v1";
                         record.confidence = 0.88;
+                        for (auto& flow : record.arguments) {
+                            if (flow.parameter_index >= prototype->parameters.size()) continue;
+                            flow.argument_type = prototype->parameters[flow.parameter_index];
+                            flow.type_status = "catalogued";
+                            flow.type_confidence = record.confidence;
+                            flow.evidence.push_back({"windows_sdk_prototype_catalog_v1",
+                                "argument type follows the exact catalogued imported-function prototype", record.confidence});
+                        }
                     } else {
                         record.prototype_status = "unknown";
                         record.prototype_source = "none";
@@ -935,10 +1153,50 @@ void analyze_phase4(AnalysisReport& report) {
         result.imported_calls.push_back(std::move(item.second));
         for (const auto& flow : result.imported_calls.back().arguments) result.call_argument_flows.push_back(flow);
     }
+    bool type_changed = true;
+    for (std::size_t pass = 0; type_changed && pass < signatures_by_start.size(); ++pass) {
+        type_changed = false;
+        for (auto& flow : result.call_argument_flows) {
+            if (flow.source_kind == "unknown" || !flow.target_rva) continue;
+            const auto callee = signatures_by_start.find(*flow.target_rva);
+            if (callee == signatures_by_start.end() || flow.parameter_index >= callee->second.parameters.size()) continue;
+            const auto& target_parameter = callee->second.parameters[flow.parameter_index];
+            if (target_parameter.type.empty() || target_parameter.type == "unknown") continue;
+            if (flow.argument_type == "unknown") {
+                flow.argument_type = target_parameter.type;
+                flow.type_status = "inferred";
+                flow.type_confidence = std::min(0.68, target_parameter.confidence * 0.72);
+                flow.evidence.push_back({"callee_parameter_type_propagation",
+                    "argument type is inferred from the target function parameter at this direct call site", flow.type_confidence});
+            }
+            if (flow.source_kind != "caller_entry_parameter") continue;
+            const auto caller = signatures_by_start.find(flow.caller_start_rva);
+            if (caller == signatures_by_start.end()) continue;
+            const auto caller_parameter = std::find_if(caller->second.parameters.begin(), caller->second.parameters.end(), [&flow](const AbiParameterRecord& parameter) {
+                return parameter.location == "register" && canonical_register(parameter.reg) == canonical_register(flow.argument_register);
+            });
+            if (caller_parameter == caller->second.parameters.end() || caller_parameter->type != "unknown") continue;
+            caller_parameter->type = target_parameter.type;
+            caller_parameter->type_status = "inferred";
+            caller_parameter->confidence = std::min(0.62, target_parameter.confidence * 0.68);
+            caller_parameter->evidence.push_back({"callee_parameter_type_propagation",
+                "this entry parameter is forwarded unchanged in the ABI register to a direct callee with a known parameter type at RVA " +
+                hex_value(flow.call_rva), caller_parameter->confidence});
+            caller->second.evidence.push_back({"callee_parameter_type_propagation",
+                "a caller entry parameter type is propagated from a direct callee signature", caller_parameter->confidence});
+            type_changed = true;
+        }
+    }
+    for (const auto& item : signatures_by_start) {
+        const auto output_signature = std::find_if(result.signatures.begin(), result.signatures.end(), [&item](const FunctionSignatureRecord& signature) {
+            return signature.function_start_rva == item.first;
+        });
+        if (output_signature != result.signatures.end()) *output_signature = item.second;
+    }
     for (const auto& function : report.semantic_analysis.functions)
         recover_structures(function, report.semantic_analysis, result);
 
-    result.limitations.push_back("PDB TPI support is limited to procedure/argument-list records and scalar/modifier/pointer types; UDT layouts, RTTI, vtables, and general aggregate types remain unknown");
+    result.limitations.push_back("PDB TPI support is limited to procedure/argument-list records and scalar/modifier/pointer types; UDT layouts and general aggregate types remain unknown; RTTI discovery recognizes only bounded MSVC x64 COL/TypeDescriptor/CHD patterns");
     result.limitations.push_back("register reaching definitions use a bounded linear scan and are not path-sensitive; call-argument provenance is labelled accordingly");
     result.limitations.push_back("indirect jump tables are not recognized as switches; unresolved or irreducible flow stays in the CFG/disassembly representation");
     result.limitations.push_back("confidence values are evidence-strength labels; calibration is measured only by the checked-in Gate 4 ground-truth benchmark");
@@ -957,6 +1215,14 @@ std::string emit_pseudocode(const AnalysisReport& report) {
     for (const auto& item : report.semantic_analysis.instructions) semantic.emplace(item.rva, &item);
     std::map<std::uint32_t, const ImportedCallRecord*> imported;
     for (const auto& item : report.phase4_analysis.imported_calls) imported.emplace(item.call_rva, &item);
+    for (const auto& type : report.phase4_analysis.rtti_vtables) {
+        out << "/* MSVC RTTI class=" << type.type_name << " TypeDescriptor=" << hex_value(type.type_descriptor_rva)
+            << " COL=" << hex_value(type.complete_object_locator_rva) << " vtable="
+            << (type.vtable_rva ? hex_value(type.vtable_rva) : std::string("unresolved")) << " methods=";
+        for (std::size_t i = 0; i < type.virtual_method_rvas.size(); ++i)
+            out << (i ? "," : "") << hex_value(type.virtual_method_rvas[i]);
+        out << "; aggregate layout unknown */\n";
+    }
     if (report.semantic_analysis.functions.empty()) out << "/* No candidate functions are available; use the annotated disassembly and JSON report. */\n";
     for (const auto& function : report.semantic_analysis.functions) {
         const auto signature = std::find_if(report.phase4_analysis.signatures.begin(), report.phase4_analysis.signatures.end(), [&function](const FunctionSignatureRecord& item) {
@@ -1074,7 +1340,9 @@ std::string phase4_analysis_to_json(const Phase4AnalysisRecord& r) {
             << ",\"argument_register\":\"" << json_escape(flow.argument_register) << "\",\"source_kind\":\""
             << json_escape(flow.source_kind) << "\",\"source_description\":\"" << json_escape(flow.source_description) << "\",\"source_rva\":";
         if (flow.source_rva) out << *flow.source_rva; else out << "null";
-        out << ",\"confidence\":" << flow.confidence << ",\"evidence\":";
+        out << ",\"argument_type\":\"" << json_escape(flow.argument_type) << "\",\"type_status\":\""
+            << json_escape(flow.type_status) << "\",\"type_confidence\":" << flow.type_confidence
+            << ",\"confidence\":" << flow.confidence << ",\"evidence\":";
         emit_evidence(out, flow.evidence);
         out << '}';
     };
@@ -1105,6 +1373,22 @@ std::string phase4_analysis_to_json(const Phase4AnalysisRecord& r) {
         for (std::size_t j = 0; j < item.block_ids.size(); ++j) out << (j ? "," : "") << item.block_ids[j];
         out << "],\"confidence\":" << item.confidence << ",\"reason\":\"" << json_escape(item.reason) << "\",\"evidence\":";
         emit_evidence(out, item.evidence);
+        out << '}';
+    }
+    out << "],\"rtti_vtables\":[";
+    for (std::size_t i = 0; i < r.rtti_vtables.size(); ++i) {
+        const auto& type = r.rtti_vtables[i];
+        out << (i ? "," : "") << "{\"type_name\":\"" << json_escape(type.type_name)
+            << "\",\"type_descriptor_rva\":" << type.type_descriptor_rva
+            << ",\"complete_object_locator_rva\":" << type.complete_object_locator_rva
+            << ",\"class_hierarchy_descriptor_rva\":" << type.class_hierarchy_descriptor_rva
+            << ",\"vtable_rva\":" << type.vtable_rva << ",\"base_type_names\":";
+        emit_strings(out, type.base_type_names);
+        out << ",\"virtual_method_rvas\":[";
+        for (std::size_t j = 0; j < type.virtual_method_rvas.size(); ++j)
+            out << (j ? "," : "") << type.virtual_method_rvas[j];
+        out << "],\"confidence\":" << type.confidence << ",\"evidence\":";
+        emit_evidence(out, type.evidence);
         out << '}';
     }
     out << "],\"limitations\":";

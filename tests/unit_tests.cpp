@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -485,6 +486,93 @@ bool phase4_import_dataflow_tests() {
     }
     return true;
 }
+
+bool phase4_callee_type_propagation_tests() {
+    nexusrev::AnalysisReport report;
+    configure_pe(report);
+    auto caller_move = synthetic_instruction(0x1000U, "mov", "8b c1");
+    auto eax_write = reg_operand("eax", 2U); eax_write.size = 4U;
+    auto ecx_read = reg_operand("ecx", 1U); ecx_read.size = 4U;
+    caller_move.detail_operands = {eax_write, ecx_read};
+    caller_move.registers_read = {"ecx"}; caller_move.registers_written = {"eax"};
+    report.instructions.push_back(caller_move);
+    auto call = synthetic_instruction(0x1002U, "call", "e8 19 00 00 00");
+    call.detail_operands = {imm_operand(0x140001020ULL)};
+    report.instructions.push_back(call);
+    report.instructions.push_back(synthetic_instruction(0x1007U, "ret", "c3"));
+    auto callee_move = synthetic_instruction(0x1020U, "mov", "8b c1");
+    callee_move.detail_operands = {eax_write, ecx_read};
+    callee_move.registers_read = {"ecx"}; callee_move.registers_written = {"eax"};
+    report.instructions.push_back(callee_move);
+    report.instructions.push_back(synthetic_instruction(0x1022U, "ret", "c3"));
+    nexusrev::FunctionRecord caller;
+    caller.entity_kind = "candidate_function"; caller.boundary_status = "evidence_bounded";
+    caller.start_rva = 0x1000U; caller.end_rva = 0x1008U; caller.label = "typed_caller";
+    caller.evidence.push_back({"synthetic_test", "direct caller type-propagation fixture", 1.0, std::nullopt, 0x1000U, 0x1008U});
+    report.function_recovery.candidate_functions.push_back(caller);
+    nexusrev::FunctionRecord callee = caller;
+    callee.start_rva = 0x1020U; callee.end_rva = 0x1023U; callee.label = "typed_callee";
+    callee.evidence.clear();
+    callee.evidence.push_back({"synthetic_test", "direct callee type-propagation fixture", 1.0, std::nullopt, 0x1020U, 0x1023U});
+    report.function_recovery.candidate_functions.push_back(callee);
+    report.symbols.status = "matched";
+    nexusrev::PdbFunctionSymbol symbol;
+    symbol.name = "typed_callee"; symbol.start_rva = 0x1020U; symbol.type_index = 0x1008U;
+    symbol.type_status = "decoded"; symbol.return_type = "int"; symbol.parameter_types = {"int"};
+    symbol.type_provenance = "pdb_tpi_procedure_record";
+    report.symbols.functions.push_back(symbol);
+    nexusrev::analyze_semantics(report);
+    nexusrev::analyze_phase4(report);
+    const auto caller_signature = std::find_if(report.phase4_analysis.signatures.begin(), report.phase4_analysis.signatures.end(), [](const auto& item) {
+        return item.function_start_rva == 0x1000U;
+    });
+    const auto flow = std::find_if(report.phase4_analysis.call_argument_flows.begin(), report.phase4_analysis.call_argument_flows.end(), [](const auto& item) {
+        return item.caller_start_rva == 0x1000U && item.call_rva == 0x1002U && item.parameter_index == 0U;
+    });
+    if (caller_signature == report.phase4_analysis.signatures.end() || caller_signature->parameters.empty() ||
+        caller_signature->parameters[0].type != "int" || caller_signature->parameters[0].type_status != "inferred" ||
+        flow == report.phase4_analysis.call_argument_flows.end() || flow->argument_type != "int" ||
+        flow->type_status != "inferred" || flow->evidence.empty()) {
+        std::cerr << "callee parameter type was not propagated through an unchanged caller-entry argument\n"; return false;
+    }
+    return true;
+}
+
+bool phase4_rtti_vtable_tests() {
+    nexusrev::AnalysisReport report;
+    configure_pe(report);
+    auto& text = report.pe.sections[0];
+    text.raw_offset = 0x200U; text.raw_size = 0x20U; text.file_backed_size = 0x20U;
+    text.mapped_size = 0x20U; text.virtual_size = 0x20U;
+    nexusrev::PeSection data;
+    data.name = ".rdata"; data.virtual_address = 0x3000U; data.virtual_size = 0x200U;
+    data.raw_offset = 0U; data.raw_size = 0x200U; data.file_backed_size = 0x200U;
+    data.mapped_size = 0x200U; data.executable = false;
+    report.pe.sections.push_back(data);
+    std::vector<std::uint8_t> bytes(0x400U, 0U);
+    const std::string decorated_name = ".?AVWidget@@";
+    std::copy(decorated_name.begin(), decorated_name.end(), bytes.begin() + 0x30U);
+    put32(bytes, 0x80U, 0U); put32(bytes, 0x84U, 0U); put32(bytes, 0x88U, 1U); put32(bytes, 0x8cU, 0x3090U);
+    put32(bytes, 0x90U, 0x30a0U); put32(bytes, 0xa0U, 0x3020U);
+    put32(bytes, 0xb0U, 1U); put32(bytes, 0xb4U, 0U); put32(bytes, 0xb8U, 0U);
+    put32(bytes, 0xbcU, 0x3020U); put32(bytes, 0xc0U, 0x3080U); put32(bytes, 0xc4U, 0x30b0U);
+    put64(bytes, 0xc8U, report.pe.image_base + 0x30b0U);
+    put64(bytes, 0xd0U, report.pe.image_base + 0x1000U);
+    put64(bytes, 0xd8U, report.pe.image_base + 0x1010U);
+    report.pe.file_bytes = std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes));
+    nexusrev::analyze_phase4(report);
+    if (report.phase4_analysis.rtti_vtables.size() != 1U ||
+        report.phase4_analysis.rtti_vtables[0].type_name != "Widget" ||
+        report.phase4_analysis.rtti_vtables[0].vtable_rva != 0x30d0U ||
+        report.phase4_analysis.rtti_vtables[0].virtual_method_rvas != std::vector<std::uint32_t>({0x1000U, 0x1010U}) ||
+        report.phase4_analysis.rtti_vtables[0].evidence.size() < 2U) {
+        std::cerr << "bounded MSVC RTTI/vtable evidence was not recovered from synthetic in-memory PE data\n"; return false;
+    }
+    if (nexusrev::emit_pseudocode(report).find("MSVC RTTI class=Widget") == std::string::npos) {
+        std::cerr << "pseudocode did not preserve recovered RTTI/vtable evidence\n"; return false;
+    }
+    return true;
+}
 }
 
 int main() {
@@ -501,7 +589,8 @@ int main() {
         return 1;
     }
     if (!pe_parser_tests() || !semantic_operation_tests() || !cfg_and_reference_tests() ||
-        !phase4_stack_and_signature_tests() || !phase4_import_dataflow_tests()) return 1;
+        !phase4_stack_and_signature_tests() || !phase4_import_dataflow_tests() ||
+        !phase4_callee_type_propagation_tests() || !phase4_rtti_vtable_tests()) return 1;
     std::cout << "SHA-256, PE parser, Phase 3 semantic/CFG, Phase 4 ABI/dataflow, and reference tests passed\n";
     return 0;
 }
