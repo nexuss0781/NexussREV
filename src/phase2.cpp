@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <queue>
 #include <set>
 #include <string_view>
@@ -18,6 +19,7 @@ namespace {
 constexpr std::uint64_t kMaxPdbBytes = 256ULL * 1024ULL * 1024ULL;
 constexpr std::size_t kMaxPdbStreams = 4096U;
 constexpr std::size_t kMaxPdbFunctions = 20000U;
+constexpr std::size_t kMaxPdbTypeRecords = 1000000U;
 constexpr std::size_t kMaxRecoveryRecords = 20000U;
 constexpr std::size_t kMaxRecursiveInstructions = 20000U;
 
@@ -94,13 +96,15 @@ public:
         }
         std::vector<PdbModule> modules;
         if (!parse_modules(dbi, module_info_bytes, modules, error)) return false;
+        std::map<std::uint32_t, PdbFunctionType> function_types;
+        (void)parse_tpi(function_types);
         for (const auto& module : modules) {
             if (module.stream_index == 0xffffU || module.symbol_bytes == 0U) continue;
             std::vector<std::uint8_t> stream;
             if (!read_stream(module.stream_index, stream)) continue;
             const std::size_t symbol_start = stream.size() >= 4U ? 4U : 0U;
             const std::size_t declared = std::min<std::size_t>(module.symbol_bytes, stream.size() - symbol_start);
-            parse_module_symbols(stream, symbol_start, declared, functions, image);
+            parse_module_symbols(stream, symbol_start, declared, functions, image, function_types);
             if (functions.size() >= kMaxPdbFunctions) break;
         }
         return true;
@@ -111,6 +115,137 @@ private:
         std::uint32_t size = 0xffffffffU;
         std::vector<std::uint32_t> blocks;
     };
+    struct PdbTypeRecord {
+        std::uint16_t kind = 0;
+        std::uint32_t underlying_type = 0;
+        std::uint32_t argument_list = 0;
+        std::uint16_t parameter_count = 0;
+        std::vector<std::uint32_t> argument_types;
+    };
+    struct PdbFunctionType {
+        std::string return_type = "unknown";
+        std::vector<std::string> parameter_types;
+        std::string status = "partial";
+    };
+
+    static std::string resolve_type(std::uint32_t index,
+                                    const std::map<std::uint32_t, PdbTypeRecord>& records,
+                                    std::size_t depth = 0U) {
+        if (depth > 16U) return "unknown";
+        if (index < 0x1000U) {
+            const auto base = static_cast<std::uint16_t>(index & 0xffU);
+            const auto mode = static_cast<std::uint16_t>((index >> 8U) & 0x0fU);
+            static const std::map<std::uint16_t, std::string> simple_types = {
+                {0x03U, "void"}, {0x10U, "char"}, {0x11U, "short"}, {0x12U, "long"},
+                {0x13U, "__int64"}, {0x14U, "__int128"}, {0x20U, "unsigned char"},
+                {0x21U, "unsigned short"}, {0x22U, "unsigned long"}, {0x23U, "unsigned __int64"},
+                {0x30U, "bool"}, {0x31U, "bool"}, {0x32U, "bool"}, {0x33U, "bool"},
+                {0x40U, "float"}, {0x41U, "double"}, {0x42U, "long double"},
+                {0x70U, "int8_t"}, {0x71U, "uint8_t"}, {0x72U, "int16_t"}, {0x73U, "uint16_t"},
+                {0x74U, "int"}, {0x75U, "unsigned int"}, {0x76U, "__int64"},
+                {0x77U, "unsigned __int64"}, {0x78U, "__int128"}, {0x79U, "unsigned __int128"},
+                {0x80U, "char"}, {0x81U, "wchar_t"}, {0x82U, "char16_t"}, {0x83U, "char32_t"}
+            };
+            const auto found = simple_types.find(base);
+            if (found == simple_types.end()) return "unknown";
+            std::string result = found->second;
+            if (mode != 0U) result += "*";
+            return result;
+        }
+        const auto found = records.find(index);
+        if (found == records.end()) return "unknown";
+        const auto& record = found->second;
+        if (record.kind == 0x1001U) {
+            std::string result = resolve_type(record.underlying_type, records, depth + 1U);
+            return result == "unknown" ? result : "const " + result;
+        }
+        if (record.kind == 0x1002U) {
+            const std::string pointee = resolve_type(record.underlying_type, records, depth + 1U);
+            return pointee == "unknown" ? pointee : pointee + "*";
+        }
+        return "unknown";
+    }
+
+    bool parse_tpi(std::map<std::uint32_t, PdbFunctionType>& function_types) const {
+        std::vector<std::uint8_t> stream;
+        if (!read_stream(2U, stream) || stream.size() < 20U) return false;
+        std::uint32_t header_size = 0, type_index_begin = 0, type_index_end = 0, records_size = 0;
+        if (!read_u32(stream, 4U, header_size) || !read_u32(stream, 8U, type_index_begin) ||
+            !read_u32(stream, 12U, type_index_end) || !read_u32(stream, 16U, records_size) ||
+            header_size < 20U || header_size > stream.size() || records_size > stream.size() - header_size ||
+            type_index_end < type_index_begin || static_cast<std::uint64_t>(type_index_end) - type_index_begin > kMaxPdbTypeRecords)
+            return false;
+        const std::size_t records_end = static_cast<std::size_t>(header_size) + records_size;
+        std::map<std::uint32_t, PdbTypeRecord> records;
+        std::uint32_t type_index = type_index_begin;
+        std::size_t cursor = header_size;
+        while (cursor < records_end && type_index < type_index_end) {
+            std::uint16_t record_length = 0, kind = 0;
+            if (!read_u16(stream, cursor, record_length) || record_length < 2U ||
+                record_length > records_end - cursor - 2U || !read_u16(stream, cursor + 2U, kind)) return false;
+            const std::size_t record_end = cursor + 2U + record_length;
+            const std::size_t payload = cursor + 4U;
+            PdbTypeRecord record;
+            record.kind = kind;
+            if (kind == 0x1008U) { // LF_PROCEDURE
+                std::uint32_t return_index = 0, arglist = 0;
+                if (record_end - payload < 12U || !read_u32(stream, payload, return_index) ||
+                    !read_u16(stream, payload + 6U, record.parameter_count) ||
+                    !read_u32(stream, payload + 8U, arglist)) return false;
+                record.underlying_type = return_index;
+                record.argument_list = arglist;
+            } else if (kind == 0x1009U) { // LF_MFUNCTION
+                std::uint32_t return_index = 0, arglist = 0;
+                if (record_end - payload < 24U || !read_u32(stream, payload, return_index) ||
+                    !read_u16(stream, payload + 14U, record.parameter_count) ||
+                    !read_u32(stream, payload + 16U, arglist)) return false;
+                record.underlying_type = return_index;
+                record.argument_list = arglist;
+            } else if (kind == 0x1201U) { // LF_ARGLIST
+                std::uint32_t count = 0;
+                if (record_end - payload < 4U || !read_u32(stream, payload, count) ||
+                    count > 65536U || static_cast<std::uint64_t>(count) * 4U > record_end - payload - 4U) return false;
+                record.argument_types.reserve(count);
+                for (std::uint32_t i = 0; i < count; ++i) {
+                    std::uint32_t argument = 0;
+                    if (!read_u32(stream, payload + 4U + static_cast<std::size_t>(i) * 4U, argument)) return false;
+                    record.argument_types.push_back(argument);
+                }
+            } else if (kind == 0x1001U) { // LF_MODIFIER
+                if (record_end - payload < 6U || !read_u32(stream, payload, record.underlying_type)) return false;
+            } else if (kind == 0x1002U) { // LF_POINTER
+                if (record_end - payload < 8U || !read_u32(stream, payload, record.underlying_type)) return false;
+            }
+            records.emplace(type_index, std::move(record));
+            ++type_index;
+            cursor = record_end;
+            while (cursor < records_end && (cursor & 3U) != 0U && stream[cursor] >= 0xf1U) ++cursor;
+        }
+        if (cursor != records_end || type_index != type_index_end) return false;
+        for (const auto& item : records) {
+            const auto& procedure = item.second;
+            if (procedure.kind != 0x1008U && procedure.kind != 0x1009U) continue;
+            PdbFunctionType signature;
+            signature.return_type = resolve_type(procedure.underlying_type, records);
+            const auto arglist = records.find(procedure.argument_list);
+            if (procedure.parameter_count == 0U) {
+                signature.status = signature.return_type == "unknown" ? "partial" : "decoded";
+            } else if (arglist != records.end() && arglist->second.kind == 0x1201U &&
+                       arglist->second.argument_types.size() == procedure.parameter_count) {
+                bool complete = signature.return_type != "unknown";
+                for (const auto argument : arglist->second.argument_types) {
+                    const auto type = resolve_type(argument, records);
+                    complete = complete && type != "unknown";
+                    signature.parameter_types.push_back(type);
+                }
+                signature.status = complete ? "decoded" : "partial";
+            } else {
+                signature.status = "partial";
+            }
+            function_types.emplace(item.first, std::move(signature));
+        }
+        return true;
+    }
 
     bool open_msf(std::string& error) {
         static constexpr char signature[] = "Microsoft C/C++ MSF 7.00\r\n\x1a" "DS\0\0\0";
@@ -239,7 +374,8 @@ private:
 
     static void parse_module_symbols(const std::vector<std::uint8_t>& stream, std::size_t begin,
                                      std::size_t byte_count, std::vector<PdbFunctionSymbol>& functions,
-                                     const PeImage& image) {
+                                     const PeImage& image,
+                                     const std::map<std::uint32_t, PdbFunctionType>& function_types) {
         const std::size_t end = std::min(stream.size(), begin + byte_count);
         std::size_t cursor = begin;
         while (cursor + 4U <= end && functions.size() < kMaxPdbFunctions) {
@@ -287,6 +423,13 @@ private:
                         if (end_rva <= std::numeric_limits<std::uint32_t>::max())
                             symbol.end_rva = static_cast<std::uint32_t>(end_rva);
                         symbol.type_index = type_index;
+                        const auto signature = function_types.find(type_index);
+                        if (signature != function_types.end()) {
+                            symbol.type_status = signature->second.status;
+                            symbol.return_type = signature->second.return_type;
+                            symbol.parameter_types = signature->second.parameter_types;
+                            symbol.type_provenance = "pdb_tpi_procedure_record";
+                        }
                         symbol.provenance = "pdb_procedure_record";
                         functions.push_back(std::move(symbol));
                     }

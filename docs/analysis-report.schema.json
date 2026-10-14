@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://nexussrev.example/schemas/analysis-report-v4.schema.json",
+  "$id": "https://nexussrev.example/schemas/analysis-report-v5.schema.json",
   "title": "NexussREV Analysis Report",
-  "description": "Version 4 report for bounded PE decoding, evidence-labelled function boundaries, conservative x86-64 semantics, and CFG/call-graph analysis. Results do not claim original-source recovery.",
+  "description": "Version 5 report for bounded PE decoding, evidence-labelled function boundaries, conservative x86-64 semantics, CFG/call-graph analysis, and Phase 4 ABI/dataflow recovery. Results do not claim original-source recovery.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "status", "run", "input", "tool", "dependencies", "pe", "decode", "symbols", "function_recovery", "semantic_analysis", "stages", "diagnostics", "artifacts"],
+  "required": ["schema_version", "status", "run", "input", "tool", "dependencies", "pe", "decode", "symbols", "function_recovery", "semantic_analysis", "dataflow_analysis", "stages", "diagnostics", "artifacts"],
   "properties": {
-    "schema_version": { "const": 4 },
+    "schema_version": { "const": 5 },
     "status": { "$ref": "#/$defs/stageStatus" },
     "run": {
       "type": "object", "additionalProperties": false,
@@ -99,6 +99,7 @@
     "symbols": { "$ref": "#/$defs/symbols" },
     "function_recovery": { "$ref": "#/$defs/functionRecovery" },
     "semantic_analysis": { "$ref": "#/$defs/semanticAnalysis" },
+    "dataflow_analysis": { "$ref": "#/$defs/dataflowAnalysis" },
     "stages": {
       "type": "array", "items": {
         "type": "object", "additionalProperties": false,
@@ -129,11 +130,13 @@
     },
     "pdbFunction": {
       "type": "object", "additionalProperties": false,
-      "required": ["name", "start_rva", "end_rva", "type_index", "provenance", "confidence"],
+      "required": ["name", "start_rva", "end_rva", "type_index", "type_status", "return_type", "parameter_types", "type_provenance", "provenance", "confidence"],
       "properties": {
         "name": { "type": "string" }, "start_rva": { "type": "integer", "minimum": 0 },
         "end_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
         "type_index": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "type_status": { "enum": ["unknown", "partial", "decoded"] }, "return_type": { "type": "string" },
+        "parameter_types": { "type": "array", "items": { "type": "string" } }, "type_provenance": { "type": "string" },
         "provenance": { "type": "string", "minLength": 1 }, "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
       }
     },
@@ -334,6 +337,111 @@
         "immediate": { "type": "integer" }, "segment": { "type": "string" }, "base": { "type": "string" },
         "index": { "type": "string" }, "scale": { "type": "integer" }, "displacement": { "type": "integer" },
         "avx_broadcast": { "type": "integer", "minimum": 0, "maximum": 255 }, "avx_zero_opmask": { "type": "boolean" }
+      }
+    },
+    "phase4Evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "description", "confidence"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 }, "description": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "dataflowAnalysis": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "backend", "abi", "stack_frames", "signatures", "call_argument_flows", "imported_calls", "control_structures", "limitations"],
+      "properties": {
+        "status": { "$ref": "#/$defs/stageStatus" }, "backend": { "type": "string" }, "abi": { "type": "string" },
+        "stack_frames": { "type": "array", "items": { "$ref": "#/$defs/stackFrame" } },
+        "signatures": { "type": "array", "items": { "$ref": "#/$defs/functionSignature" } },
+        "call_argument_flows": { "type": "array", "items": { "$ref": "#/$defs/callArgumentFlow" } },
+        "imported_calls": { "type": "array", "items": { "$ref": "#/$defs/importedCall" } },
+        "control_structures": { "type": "array", "items": { "$ref": "#/$defs/controlStructure" } },
+        "limitations": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "stackFrame": {
+      "type": "object", "additionalProperties": false,
+      "required": ["function_start_rva", "status", "has_frame_pointer", "frame_pointer_register", "max_stack_depth_bytes_below_entry_rsp", "variables", "issues"],
+      "properties": {
+        "function_start_rva": { "type": "integer", "minimum": 0 }, "status": { "$ref": "#/$defs/stageStatus" },
+        "has_frame_pointer": { "type": "boolean" }, "frame_pointer_register": { "type": "string" },
+        "max_stack_depth_bytes_below_entry_rsp": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "variables": { "type": "array", "items": { "$ref": "#/$defs/recoveredVariable" } },
+        "issues": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "recoveredVariable": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "storage", "stack_offset", "register", "size", "type", "confidence", "read_count", "write_count", "evidence"],
+      "properties": {
+        "name": { "type": "string" }, "storage": { "enum": ["stack_slot", "register", "unknown"] },
+        "stack_offset": { "oneOf": [{ "type": "integer" }, { "type": "null" }] }, "register": { "type": "string" },
+        "size": { "type": "integer", "minimum": 0, "maximum": 255 }, "type": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "read_count": { "type": "integer", "minimum": 0 }, "write_count": { "type": "integer", "minimum": 0 },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } }
+      }
+    },
+    "functionSignature": {
+      "type": "object", "additionalProperties": false,
+      "required": ["function_start_rva", "label", "status", "calling_convention", "return_type", "return_type_status", "confidence", "evidence", "parameters"],
+      "properties": {
+        "function_start_rva": { "type": "integer", "minimum": 0 }, "label": { "type": "string" },
+        "status": { "$ref": "#/$defs/stageStatus" }, "calling_convention": { "type": "string" },
+        "return_type": { "type": "string" }, "return_type_status": { "enum": ["unknown", "observed", "inferred", "catalogued"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } },
+        "parameters": { "type": "array", "items": { "$ref": "#/$defs/abiParameter" } }
+      }
+    },
+    "abiParameter": {
+      "type": "object", "additionalProperties": false,
+      "required": ["index", "location", "register", "stack_offset", "type", "type_status", "confidence", "evidence"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 }, "location": { "enum": ["register", "stack", "unknown"] },
+        "register": { "type": "string" }, "stack_offset": { "oneOf": [{ "type": "integer" }, { "type": "null" }] },
+        "type": { "type": "string" }, "type_status": { "enum": ["unknown", "observed", "inferred", "catalogued"] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } }
+      }
+    },
+    "callArgumentFlow": {
+      "type": "object", "additionalProperties": false,
+      "required": ["caller_start_rva", "call_rva", "target_rva", "callee", "parameter_index", "argument_register", "source_kind", "source_description", "source_rva", "confidence", "evidence"],
+      "properties": {
+        "caller_start_rva": { "type": "integer", "minimum": 0 }, "call_rva": { "type": "integer", "minimum": 0 },
+        "target_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "callee": { "type": "string" }, "parameter_index": { "type": "integer", "minimum": 0 },
+        "argument_register": { "type": "string" }, "source_kind": { "type": "string" }, "source_description": { "type": "string" },
+        "source_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } }
+      }
+    },
+    "importedCall": {
+      "type": "object", "additionalProperties": false,
+      "required": ["caller_start_rva", "call_rva", "iat_rva", "library", "name", "prototype_status", "return_type", "parameter_types", "prototype_source", "confidence", "arguments"],
+      "properties": {
+        "caller_start_rva": { "type": "integer", "minimum": 0 }, "call_rva": { "type": "integer", "minimum": 0 },
+        "iat_rva": { "type": "integer", "minimum": 0 }, "library": { "type": "string" }, "name": { "type": "string" },
+        "prototype_status": { "enum": ["catalogued", "unknown"] }, "return_type": { "type": "string" },
+        "parameter_types": { "type": "array", "items": { "type": "string" } }, "prototype_source": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "arguments": { "type": "array", "items": { "$ref": "#/$defs/callArgumentFlow" } }
+      }
+    },
+    "controlStructure": {
+      "type": "object", "additionalProperties": false,
+      "required": ["function_start_rva", "kind", "status", "test_rva", "join_block", "block_ids", "confidence", "reason", "evidence"],
+      "properties": {
+        "function_start_rva": { "type": "integer", "minimum": 0 }, "kind": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/$defs/stageStatus" },
+        "test_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "join_block": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "block_ids": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }, "reason": { "type": "string" },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/phase4Evidence" } }
       }
     },
     "semanticAnalysis": {

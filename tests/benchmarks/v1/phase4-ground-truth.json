@@ -1,0 +1,51 @@
+{
+  "format_version": 1,
+  "name": "NexussREV Phase 4 ABI/signature and type ground truth",
+  "source": "../../fixtures/phase2/corpus.c",
+  "source_sha256": "9bbbf1c673ce7365a51b28d9a9cbe3b9cc9bea045baf718c856a65c1ba880d92",
+  "metric_policy": {
+    "signature_fact": "function label + Microsoft x64 parameter index + ABI register/stack location",
+    "type_fact": "function label + parameter index + declared source type; return types are measured separately",
+    "unknown_policy": "unknown is not a predicted type; each missing ground-truth fact remains a false negative; precision is 0 when there are no positive predictions",
+    "confidence_split": "clang-o2-pdb-dll is held out from the primary signature/type score and is used for confidence calibration"
+  },
+  "minimum_primary_signature_precision": 1.0,
+  "minimum_primary_signature_recall": 1.0,
+  "minimum_primary_parameter_type_precision": 1.0,
+  "minimum_primary_parameter_type_recall": 1.0,
+  "minimum_primary_return_type_precision": 1.0,
+  "minimum_primary_return_type_recall": 1.0,
+  "minimum_held_out_signature_precision": 1.0,
+  "minimum_held_out_signature_recall": 1.0,
+  "minimum_held_out_parameter_type_precision": 1.0,
+  "minimum_held_out_parameter_type_recall": 1.0,
+  "minimum_held_out_return_type_precision": 1.0,
+  "minimum_held_out_return_type_recall": 1.0,
+  "maximum_held_out_expected_calibration_error": 0.30,
+  "samples": [
+    {
+      "id": "clang-o0-pdb-dll",
+      "input": "phase2/pdb-sample.dll",
+      "input_sha256": "706cc1e717a404cd683dc937dc9f929d8f9eef1eb0ad9b99cee6349c06ab3a07",
+      "held_out": false,
+      "functions": [
+        { "name": "add_one", "return_type": "int", "parameters": [{ "index": 0, "location": "register", "register": "rcx", "type": "int" }] },
+        { "name": "call_add", "return_type": "int", "parameters": [{ "index": 0, "location": "register", "register": "rcx", "type": "int" }] },
+        { "name": "private_helper", "return_type": "int", "parameters": [{ "index": 0, "location": "register", "register": "rcx", "type": "int" }] },
+        { "name": "call_helper", "return_type": "int", "parameters": [{ "index": 0, "location": "register", "register": "rcx", "type": "int" }] }
+      ]
+    },
+    {
+      "id": "clang-o2-pdb-dll-held-out",
+      "input": "phase2/pdb-sample-o2.dll",
+      "input_sha256": "214531b6d8be83fbffe1aeb1d1120b56e48598f37cc65319309c2e1ac7195fcd",
+      "held_out": true,
+      "functions": [
+        { "name": "add_one", "return_type": "int", "parameters": [{ "index": 0, "location": "register", "register": "rcx", "type": "int" }] },
+        { "name": "call_add", "return_type": "int", "parameters": [{ "index": 0, "location": "register", "register": "rcx", "type": "int" }] },
+        { "name": "private_helper", "return_type": "int", "parameters": [{ "index": 0, "location": "register", "register": "rcx", "type": "int" }] },
+        { "name": "call_helper", "return_type": "int", "parameters": [{ "index": 0, "location": "register", "register": "rcx", "type": "int" }] }
+      ]
+    }
+  ]
+}

@@ -17,6 +17,7 @@ add_executable(nexusrev
     src/phase1.cpp
     src/phase2.cpp
     src/phase3.cpp
+    src/phase4.cpp
     src/pe_image.cpp
     src/sha256.cpp
 )
@@ -52,6 +53,7 @@ enable_testing()
 add_executable(nexusrev_unit_tests
     tests/unit_tests.cpp
     src/phase3.cpp
+    src/phase4.cpp
     src/pe_image.cpp
     src/sha256.cpp
 )
@@ -81,3 +83,13 @@ add_test(
             --output ${CMAKE_CURRENT_BINARY_DIR}/phase2-benchmark-results.json
 )
 set_tests_properties(nexusrev_phase2_benchmark PROPERTIES TIMEOUT 120)
+
+add_test(
+    NAME nexusrev_phase4_benchmark
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/phase4_benchmark.py
+            --program $<TARGET_FILE:nexusrev>
+            --ground-truth ${CMAKE_CURRENT_SOURCE_DIR}/tests/benchmarks/v1/phase4-ground-truth.json
+            --fixtures ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures
+            --output ${CMAKE_CURRENT_BINARY_DIR}/phase4-benchmark-results.json
+)
+set_tests_properties(nexusrev_phase4_benchmark PROPERTIES TIMEOUT 120)

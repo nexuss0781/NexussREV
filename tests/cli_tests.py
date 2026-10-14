@@ -44,10 +44,11 @@ def main():
     schema = json.loads(args.schema.read_text(encoding="utf-8"))
     jsonschema.Draft202012Validator.check_schema(schema)
     report_validator = jsonschema.Draft202012Validator(schema)
-    assert schema["properties"]["schema_version"]["const"] == 4
+    assert schema["properties"]["schema_version"]["const"] == 5
     help_result = run(args.program, "--help")
     assert help_result.returncode == 0, help_result.stderr
-    assert "not original source code" in help_result.stdout
+    assert "not original source" in help_result.stdout
+    assert "pseudocode" in help_result.stdout
     assert "PE32+ x86-64" in help_result.stdout
     assert "--pdb" in help_result.stdout
     fixture_hash = hashlib.sha256(args.fixture.read_bytes()).hexdigest()
@@ -99,17 +100,17 @@ def main():
         assert report_path.is_file()
         report = json.loads(report_path.read_text(encoding="utf-8"))
         validate_report(report, report_validator)
-        assert report["schema_version"] == 4
+        assert report["schema_version"] == 5
         assert report["status"] == "partial"
         assert report["run"] == {
             "start_status": "running",
             "end_status": "partial",
             "exit_code": 0,
         }
-        assert report["tool"]["configuration_version"] == 3
+        assert report["tool"]["configuration_version"] == 4
         assert report["input"]["sha256"] == fixture_hash
         assert [stage["name"] for stage in report["stages"]] == [
-            "parse", "analysis", "symbol_provider", "function_recovery", "semantic_analysis", "emission"
+            "parse", "analysis", "symbol_provider", "function_recovery", "semantic_analysis", "dataflow_analysis", "emission"
         ]
         assert all(
             stage["status"] in {"complete", "partial", "unsupported", "failed"}
@@ -127,6 +128,9 @@ def main():
         assert report["semantic_analysis"]["status"] in {"partial", "complete"}
         assert report["semantic_analysis"]["instructions"]
         assert report["semantic_analysis"]["reference"]["status"] == "not_configured"
+        assert report["dataflow_analysis"]["status"] in {"partial", "complete"}
+        assert report["dataflow_analysis"]["abi"] == "Microsoft x64"
+        assert report["dataflow_analysis"]["signatures"]
         ghidra_tsv = root / "ghidra-reference.tsv"
         with ghidra_tsv.open("w", encoding="utf-8") as reference:
             reference.write(f"NEXUSREV_GHIDRA_REFERENCE\t1\t{report['input']['sha256']}\tunit-test\n")
@@ -160,6 +164,16 @@ def main():
         output_text = valid_output.read_text(encoding="utf-8")
         assert "not original source code" in output_text
         assert "RVA=0x" in output_text and "FILE=0x" in output_text
+
+        pseudocode_output = root / "fixture.pseudo.c"
+        pseudocode_result = run(args.program, "--format", "pseudocode", args.fixture, pseudocode_output)
+        assert pseudocode_result.returncode == 0, pseudocode_result.stderr
+        pseudocode_text = pseudocode_output.read_text(encoding="utf-8")
+        assert "best-effort C-like pseudocode" in pseudocode_text
+        assert "not original source" in pseudocode_text
+        assert "not guaranteed compilable" in pseudocode_text
+        pseudocode_report = json.loads(pathlib.Path(str(pseudocode_output) + ".report.json").read_text(encoding="utf-8"))
+        validate_report(pseudocode_report, report_validator)
 
         rich = generate("metadata-x64.exe")
         rich_output = root / "metadata.disasm"
@@ -252,6 +266,12 @@ def main():
         }
         assert all(item["provenance"] == "pdb_procedure_record" and item["type_index"] is not None
                    for item in pdb_report["symbols"]["functions"])
+        assert all(item["type_status"] == "decoded" and item["return_type"] == "int" and
+                   item["parameter_types"] == ["int"] and item["type_provenance"] == "pdb_tpi_procedure_record"
+                   for item in pdb_report["symbols"]["functions"])
+        assert all(item["return_type"] == "int" and item["return_type_status"] == "observed" and
+                   item["parameters"][0]["type"] == "int" and item["parameters"][0]["type_status"] == "observed"
+                   for item in pdb_report["dataflow_analysis"]["signatures"])
         known = pdb_report["function_recovery"]["known_functions"]
         assert len(known) == 4
         assert all(any(evidence["source"] == "pdb_procedure_record" for evidence in item["evidence"])
@@ -260,6 +280,10 @@ def main():
         pdb_text = pdb_output.read_text(encoding="utf-8")
         assert "Symbol provider: matched (4 procedure records)" in pdb_text
         assert "Known functions:" in pdb_text and "pdb_procedure_record" in pdb_text
+        pseudocode_pdb = root / "pdb-backed.pseudocode"
+        pseudocode_pdb_result = run(args.program, "--format", "pseudocode", pdb_dll, pseudocode_pdb)
+        assert pseudocode_pdb_result.returncode == 0, pseudocode_pdb_result.stderr
+        assert "int add_one(int arg0" in pseudocode_pdb.read_text(encoding="utf-8")
 
         mismatch_output = root / "pdb-mismatch.disasm"
         mismatch_result = run(args.program, "--pdb", args.phase2_fixtures / "pdb-sample-o2.pdb",

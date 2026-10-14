@@ -1,7 +1,9 @@
 #include "sha256.hpp"
 #include "pe_image.hpp"
 #include "phase3.hpp"
+#include "phase4.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -55,6 +57,13 @@ nexusrev::X86OperandRecord imm_operand(std::uint64_t va) {
     nexusrev::X86OperandRecord op;
     op.type = "immediate"; op.size = 4U; op.access = 1U;
     op.immediate = static_cast<std::int64_t>(va);
+    return op;
+}
+nexusrev::X86OperandRecord memory_operand(std::string base, std::int64_t displacement,
+                                           std::uint8_t size, std::uint8_t access) {
+    nexusrev::X86OperandRecord op;
+    op.type = "memory"; op.base = std::move(base); op.displacement = displacement;
+    op.size = size; op.access = access;
     return op;
 }
 nexusrev::InstructionRecord synthetic_instruction(std::uint32_t rva, std::string mnemonic,
@@ -243,6 +252,7 @@ bool cfg_and_reference_tests() {
     function.evidence.push_back({"synthetic_test", "labelled synthetic function", 1.0, std::nullopt, 0x1000U, 0x100fU});
     report.function_recovery.candidate_functions.push_back(function);
     nexusrev::analyze_semantics(report);
+    nexusrev::analyze_phase4(report);
     if (report.semantic_analysis.functions.size() != 1U || !report.semantic_analysis.functions[0].semantic_complete ||
         report.semantic_analysis.functions[0].status != "complete") {
         std::cerr << "fully modeled bounded synthetic function was not semantically complete\n"; return false;
@@ -257,6 +267,10 @@ bool cfg_and_reference_tests() {
     if (!true_edge || !false_edge || !call_edge || !fallthrough || report.semantic_analysis.call_graph.size() != 1U ||
         report.semantic_analysis.call_graph[0].resolution != "direct_target") {
         std::cerr << "CFG conditional, call, or fallthrough edges are missing\n"; return false;
+    }
+    if (std::none_of(report.phase4_analysis.control_structures.begin(), report.phase4_analysis.control_structures.end(),
+                     [](const nexusrev::ControlStructureRecord& item) { return item.kind == "if_region" && item.status == "complete"; })) {
+        std::cerr << "CFG-backed conditional region was not conservatively recovered\n"; return false;
     }
     const auto reference_path = std::filesystem::temp_directory_path() / "nexusrev-ghidra-reference-test.tsv";
     {
@@ -371,6 +385,106 @@ bool cfg_and_reference_tests() {
     }
     return true;
 }
+
+bool phase4_stack_and_signature_tests() {
+    nexusrev::AnalysisReport report;
+    configure_pe(report);
+    auto add = [&report](std::uint32_t rva, std::string mnemonic, std::string bytes,
+                         std::vector<nexusrev::X86OperandRecord> operands,
+                         std::vector<std::string> reads, std::vector<std::string> writes) {
+        auto insn = synthetic_instruction(rva, std::move(mnemonic), std::move(bytes));
+        insn.detail_operands = std::move(operands);
+        insn.registers_read = std::move(reads);
+        insn.registers_written = std::move(writes);
+        report.instructions.push_back(std::move(insn));
+    };
+    add(0x1000U, "push", "55", {reg_operand("rbp", 1U)}, {"rbp", "rsp"}, {"rsp"});
+    add(0x1001U, "mov", "48 89 e5", {reg_operand("rbp", 2U), reg_operand("rsp", 1U)}, {"rsp"}, {"rbp"});
+    auto rsp_write = reg_operand("rsp", 3U);
+    auto allocation = imm_operand(32U); allocation.size = 1U; allocation.access = 1U;
+    add(0x1004U, "sub", "48 83 ec 20", {rsp_write, allocation}, {"rsp"}, {"rsp"});
+    auto local_write = memory_operand("rbp", -4, 4U, 2U);
+    auto ecx_read = reg_operand("ecx", 1U); ecx_read.size = 4U;
+    add(0x1008U, "mov", "89 4d fc", {local_write, ecx_read}, {"rbp", "ecx"}, {});
+    auto local_read = memory_operand("rbp", -4, 4U, 1U);
+    auto eax_write = reg_operand("eax", 2U); eax_write.size = 4U;
+    add(0x100bU, "mov", "8b 45 fc", {eax_write, local_read}, {"rbp"}, {"eax"});
+    auto eax_rw = reg_operand("eax", 3U); eax_rw.size = 4U;
+    auto one = imm_operand(1U); one.size = 1U;
+    add(0x100eU, "add", "83 c0 01", {eax_rw, one}, {"eax"}, {"eax"});
+    add(0x1011U, "mov", "48 89 ec", {reg_operand("rsp", 2U), reg_operand("rbp", 1U)}, {"rbp"}, {"rsp"});
+    add(0x1014U, "pop", "5d", {reg_operand("rbp", 2U)}, {"rsp"}, {"rsp", "rbp"});
+    add(0x1015U, "ret", "c3", {}, {"rsp"}, {"rsp"});
+    nexusrev::FunctionRecord function;
+    function.entity_kind = "candidate_function"; function.boundary_status = "evidence_bounded";
+    function.start_rva = 0x1000U; function.end_rva = 0x1016U; function.label = "frame_sample";
+    function.evidence.push_back({"synthetic_test", "bounded phase 4 stack/ABI fixture", 1.0, std::nullopt, 0x1000U, 0x1016U});
+    report.function_recovery.candidate_functions.push_back(function);
+    nexusrev::analyze_semantics(report);
+    nexusrev::analyze_phase4(report);
+    if (report.phase4_analysis.stack_frames.size() != 1U || report.phase4_analysis.signatures.size() != 1U) {
+        std::cerr << "Phase 4 omitted a bounded function frame or signature\n"; return false;
+    }
+    const auto& frame = report.phase4_analysis.stack_frames[0];
+    const auto& signature = report.phase4_analysis.signatures[0];
+    if (frame.status != "complete" || !frame.has_frame_pointer ||
+        frame.max_stack_depth_bytes_below_entry_rsp != 40U || frame.variables.size() != 1U ||
+        frame.variables[0].stack_offset != -12 || frame.variables[0].size != 4U ||
+        frame.variables[0].read_count != 1U || frame.variables[0].write_count != 1U) {
+        std::cerr << "Stack-frame depth or stack-local slot recovery is incorrect\n"; return false;
+    }
+    if (signature.parameters.size() != 1U || signature.parameters[0].index != 0U ||
+        signature.parameters[0].reg != "rcx" || signature.parameters[0].type != "unknown" ||
+        signature.parameters[0].confidence < 0.7) {
+        std::cerr << "Microsoft x64 argument-register recovery invented a type or missed RCX\n"; return false;
+    }
+    const auto pseudocode = nexusrev::emit_pseudocode(report);
+    if (pseudocode.find("best-effort C-like pseudocode") == std::string::npos ||
+        pseudocode.find("not original source") == std::string::npos ||
+        pseudocode.find("not guaranteed compilable") == std::string::npos ||
+        pseudocode.find("unknown stack_m") == std::string::npos) {
+        std::cerr << "Pseudocode output lacks limitation labels or recovered frame annotations\n"; return false;
+    }
+    return true;
+}
+
+bool phase4_import_dataflow_tests() {
+    nexusrev::AnalysisReport report;
+    configure_pe(report);
+    nexusrev::PeImport imported;
+    imported.library = "KERNEL32.dll"; imported.name = "ExitProcess"; imported.iat_rva = 0x2000U;
+    report.pe.imports.push_back(imported);
+    auto set_code = synthetic_instruction(0x1000U, "mov", "b9 07 00 00 00");
+    auto ecx_write = reg_operand("ecx", 2U); ecx_write.size = 4U;
+    auto immediate = imm_operand(7U); immediate.size = 4U; immediate.access = 1U;
+    set_code.detail_operands = {ecx_write, immediate};
+    set_code.registers_written = {"ecx"};
+    report.instructions.push_back(set_code);
+    auto call = synthetic_instruction(0x1005U, "call", "ff 15 f5 0f 00 00");
+    call.detail_operands = {memory_operand("rip", 0xff5, 8U, 1U)};
+    call.registers_read = {"rip"};
+    report.instructions.push_back(call);
+    report.instructions.push_back(synthetic_instruction(0x100bU, "ret", "c3"));
+    nexusrev::FunctionRecord function;
+    function.entity_kind = "candidate_function"; function.boundary_status = "evidence_bounded";
+    function.start_rva = 0x1000U; function.end_rva = 0x100cU; function.label = "import_user";
+    function.evidence.push_back({"synthetic_test", "direct import call fixture", 1.0, std::nullopt, 0x1000U, 0x100cU});
+    report.function_recovery.candidate_functions.push_back(function);
+    nexusrev::analyze_semantics(report);
+    nexusrev::analyze_phase4(report);
+    if (report.phase4_analysis.imported_calls.size() != 1U) {
+        std::cerr << "RIP-relative import call was not resolved to the IAT\n"; return false;
+    }
+    const auto& import_call = report.phase4_analysis.imported_calls[0];
+    if (import_call.name != "ExitProcess" || import_call.prototype_status != "catalogued" ||
+        import_call.return_type != "void" || import_call.parameter_types != std::vector<std::string>{"UINT"} ||
+        import_call.arguments.size() != 1U || import_call.arguments[0].argument_register != "rcx" ||
+        import_call.arguments[0].source_kind != "linear_register_definition" ||
+        import_call.arguments[0].source_rva != 0x1000U) {
+        std::cerr << "Import prototype or call-site argument provenance is incomplete\n"; return false;
+    }
+    return true;
+}
 }
 
 int main() {
@@ -386,7 +500,8 @@ int main() {
         std::cerr << "SHA-256 abc test failed\n";
         return 1;
     }
-    if (!pe_parser_tests() || !semantic_operation_tests() || !cfg_and_reference_tests()) return 1;
-    std::cout << "SHA-256, PE parser, Phase 3 semantic, CFG, and Ghidra-reference tests passed\n";
+    if (!pe_parser_tests() || !semantic_operation_tests() || !cfg_and_reference_tests() ||
+        !phase4_stack_and_signature_tests() || !phase4_import_dataflow_tests()) return 1;
+    std::cout << "SHA-256, PE parser, Phase 3 semantic/CFG, Phase 4 ABI/dataflow, and reference tests passed\n";
     return 0;
 }

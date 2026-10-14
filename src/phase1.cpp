@@ -14,6 +14,7 @@
 #include "sha256.hpp"
 #include "phase2.hpp"
 #include "phase3.hpp"
+#include "phase4.hpp"
 
 #ifndef NEXUSREV_VERSION
 #define NEXUSREV_VERSION "0.1.0"
@@ -554,6 +555,11 @@ std::string make_json(const AnalysisReport& r) {
         if (symbol.end_rva) o << *symbol.end_rva; else o << "null";
         o << ",\"type_index\":";
         if (symbol.type_index) o << *symbol.type_index; else o << "null";
+        o << ",\"type_status\":\"" << escape_json(symbol.type_status)
+          << "\",\"return_type\":\"" << escape_json(symbol.return_type) << "\",\"parameter_types\":[";
+        for (std::size_t j = 0; j < symbol.parameter_types.size(); ++j)
+            o << (j ? "," : "") << '\"' << escape_json(symbol.parameter_types[j]) << '\"';
+        o << "],\"type_provenance\":\"" << escape_json(symbol.type_provenance) << '\"';
         o << ",\"provenance\":\"" << escape_json(symbol.provenance)
           << "\",\"confidence\":" << symbol.confidence << '}';
     }
@@ -594,7 +600,8 @@ std::string make_json(const AnalysisReport& r) {
       << ",\"fragment_count\":" << r.function_recovery.fragments.size()
       << ",\"bounded_range_count\":" << bounded << ",\"ambiguous_range_count\":" << ambiguous
       << ",\"unresolved_range_count\":" << r.function_recovery.unresolved_ranges.size() << "}},\n  \"semantic_analysis\":"
-      << semantic_analysis_to_json(r.semantic_analysis) << ",\n  \"stages\":[";
+      << semantic_analysis_to_json(r.semantic_analysis) << ",\n  \"dataflow_analysis\":"
+      << phase4_analysis_to_json(r.phase4_analysis) << ",\n  \"stages\":[";
     for (std::size_t i=0; i<r.stages.size(); ++i) o << (i?",":"") << "{\"name\":\"" << escape_json(r.stages[i].name) << "\",\"status\":\"" << escape_json(r.stages[i].status) << "\"}";
     o << "],\n  \"diagnostics\":[";
     for (std::size_t i=0; i<r.diagnostics.size(); ++i) { const auto& d=r.diagnostics[i]; o << (i?",":"") << "{\"code\":\"" << escape_json(d.code)
@@ -647,15 +654,17 @@ bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path) {
     }
     if (!image_.supported_x64_native) {
         report.stages.push_back({"analysis", "unsupported"}); report.status = "unsupported";
-        if (image_.clr.present) diagnostic(report, "MANAGED_CLR_UNSUPPORTED", "warning", "CLR/.NET images are identified but not analyzed as native x86-64");
+        if (image_.clr.present) diagnostic(report, "MANAGED_CLR_UNSUPPORTED", "warning", "CLR/.NET images are identified but are not analyzed as native x86-64");
         else diagnostic(report, "ARCHITECTURE_UNSUPPORTED", "warning", "only native PE32+ x86-64 images are analyzed");
         analyze_semantics(report);
+        analyze_phase4(report);
         return true;
     }
     if (image_.clr.present) {
         report.stages.push_back({"analysis", "unsupported"}); report.status = "unsupported";
-        diagnostic(report, "MANAGED_CLR_UNSUPPORTED", "warning", "CLR/.NET images are identified but not analyzed as native x86-64");
+        diagnostic(report, "MANAGED_CLR_UNSUPPORTED", "warning", "CLR/.NET images are identified but are not analyzed as native x86-64");
         analyze_semantics(report);
+        analyze_phase4(report);
         return true;
     }
     if (cs_open(CS_ARCH_X86, CS_MODE_64, &capstone_handle_) != CS_ERR_OK) {
@@ -670,6 +679,7 @@ bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path) {
     if (report.status != "failed") {
         recover_functions(report, pdb_path);
         analyze_semantics(report);
+        analyze_phase4(report);
     }
     return report.status != "failed";
 }

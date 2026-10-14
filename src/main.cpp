@@ -1,5 +1,6 @@
 #include "nexusrev.hpp"
 #include "phase3.hpp"
+#include "phase4.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -35,12 +36,12 @@ struct CliOptions {
 
 void print_usage(std::ostream& output, const char* executable) {
     output << "Usage: " << executable
-           << " [--format disassembly] [--report-json <path>] [--pdb <matching.pdb>] [--reference-report <ghidra.tsv>] <input.exe> <output>\n"
+           << " [--format disassembly|pseudocode] [--report-json <path>] [--pdb <matching.pdb>] [--reference-report <ghidra.tsv>] <input.exe> <output>\n"
            << "       " << executable << " --help\n\n"
            << "The two-path form is the compatibility mode. Native PE32+ x86-64 receives bounded decode and function-boundary analysis.\n"
            << "A PDB is used only when its GUID and age match the PE CodeView identity; otherwise it is reported and ignored.\n"
            << "An optional Ghidra headless reference TSV can be supplied with --reference-report for differential checks.\n"
-           << "Output is annotated disassembly, not original source code or guaranteed compilable C/C++.\n"
+           << "Disassembly is the default; pseudocode is an incomplete C-like analysis view, not original source or guaranteed compilable.\n"
            << "Unsupported architectures and CLR/.NET images are identified, not decoded as x64. A JSON report is\n"
            << "written to <output>.report.json unless --report-json is specified.\n";
 }
@@ -67,8 +68,8 @@ bool parse_arguments(int argc, char** argv, CliOptions& options, bool& show_help
                 return false;
             }
             options.format = argv[++index];
-            if (options.format != "disassembly") {
-                error = "unsupported format; only 'disassembly' is available";
+            if (options.format != "disassembly" && options.format != "pseudocode") {
+                error = "unsupported format; choose 'disassembly' or 'pseudocode'";
                 return false;
             }
             continue;
@@ -255,16 +256,17 @@ int main(int argc, char** argv) {
         report.stages.push_back({"emission", "complete"});
         report.artifacts = {options.output_path, options.report_path};
         report.exit_code = 0;
-        const std::string disassembly = decompiler.emit_annotated_disassembly(report);
+        const std::string output_text = options.format == "pseudocode" ?
+            nexusrev::emit_pseudocode(report) : decompiler.emit_annotated_disassembly(report);
         const std::string report_json = nexusrev::report_to_json(report);
 
         std::string write_error;
-        if (!write_artifacts(options, disassembly, report_json, write_error)) {
+        if (!write_artifacts(options, output_text, report_json, write_error)) {
             std::cerr << "OUTPUT_WRITE_FAILED: " << write_error << '\n';
             return kOutputFailure;
         }
         print_diagnostics(report);
-        std::cout << '[' << report.status << "] Wrote annotated disassembly and analysis report.\n";
+        std::cout << '[' << report.status << "] Wrote " << options.format << " and analysis report.\n";
         return 0;
     } catch (const std::exception& exception) {
         std::cerr << "INTERNAL_ERROR: " << exception.what() << '\n';

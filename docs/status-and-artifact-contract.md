@@ -1,6 +1,6 @@
-# Phase 3 status and artifact contract
+# Phase 4 status and artifact contract
 
-This contract is implemented by the Phase 1–3 CLI and the JSON Schema in [`analysis-report.schema.json`](analysis-report.schema.json). The report schema is versioned independently of the executable.
+This contract is implemented by the Phase 1–4 CLI and the JSON Schema in [`analysis-report.schema.json`](analysis-report.schema.json). The report schema is versioned independently of the executable.
 
 ## Supported input and output
 
@@ -9,11 +9,12 @@ NexussREV performs bounded static parsing of PE32/PE32+ headers and metadata. Ph
 For `nexusrev <input> <output>`:
 
 - `<output>` is UTF-8 annotated x86-64 disassembly with RVA, VA, file-offset, and byte information. It is not C/C++ source and is not guaranteed compilable.
-- `<output>.report.json` is the schema-v4 machine-readable report; override the path with `--report-json <path>`.
+- `<output>.report.json` is the schema-v5 machine-readable report; override the path with `--report-json <path>`.
+- `--format pseudocode` selects the best-effort C-like pseudocode emitter. It is explicitly labelled as incomplete, not original source, and not guaranteed compilable. The default remains annotated disassembly.
 - `--pdb <path>` selects an optional PDB. Without it, the CLI checks the PE's recorded CodeView path and same-directory filename. No remote symbol-server request is made.
 - `--reference-report <ghidra.tsv>` optionally compares function starts and control-flow facts against the versioned TSV emitted by `tools/ghidra/ExportNexussREVReference.py`.
 
-The report includes the input path, byte count and SHA-256, parsed PE identity and section layout, declared data directories, bounded import/export/relocation/debug/TLS/unwind/CLR metadata, per-instruction and decode-gap addresses/bytes, coverage totals, PDB identity and symbol-provider status, function evidence and unresolved ranges/control-flow, Phase 3 semantic instruction records, CFG blocks/typed edges, call-graph facts, optional reference differences, stages, diagnostics, dependency versions, and artifact paths. The security directory is represented as a file-offset-addressed directory, not an RVA.
+The report includes the input path, byte count and SHA-256, parsed PE identity and section layout, declared data directories, bounded import/export/relocation/debug/TLS/unwind/CLR metadata, per-instruction and decode-gap addresses/bytes, coverage totals, PDB identity and symbol-provider status, function evidence and unresolved ranges/control-flow, Phase 3 semantic instruction records, Phase 4 stack frames/signatures/import prototypes/call-argument flows/control-structure candidates, CFG blocks/typed edges, call-graph facts, optional reference differences, stages, diagnostics, dependency versions, and artifact paths. The security directory is represented as a file-offset-addressed directory, not an RVA.
 
 Parsing is bounded to a 256 MiB input, 96 sections, 32 data directories, and bounded metadata/output record counts. PDB parsing is bounded to the same input ceiling, caps stream and procedure counts, validates MSF 7.0 block/stream ranges, and trusts records only after the PE CodeView GUID and age match. Header and section ranges are validated with overflow-safe arithmetic. RVA-to-file-offset conversion rejects virtual zero-fill and out-of-range reads. LIEF is used as a secondary parse over the same in-memory byte snapshot; the validated PE adapter is the source for emitted metadata and instruction bytes.
 
@@ -38,10 +39,21 @@ For executable file-backed bytes, the report distinguishes processed, decoded, u
 ## Symbol and function-boundary semantics
 
 - PDB records are considered only for a matching PE CodeView GUID/age. The report distinguishes `not_present`, `unverifiable`, `missing`, `matched`, `mismatched`, and `invalid`; mismatch or absence is a normal partial result and must not lend a label or range to another image.
-- Matching PDB procedure records are reported as `known_functions` with provenance `pdb_procedure_record`. Only their procedure names, section-relative start/end RVAs, and type-record indices are recovered; this release does **not** decode PDB type records into inferred signatures or source types.
+- Matching PDB procedure records are reported as `known_functions` with provenance `pdb_procedure_record`. Their bounded procedure names/ranges and type indices are retained. The bounded TPI reader handles scalar, modifier, pointer, `LF_PROCEDURE`/`LF_MFUNCTION`, and `LF_ARGLIST` records; decoded signature facts have provenance `pdb_tpi_procedure_record` and are used only after the PE CodeView GUID/age match. Other CodeView type records remain `unknown`/`partial`, not guessed.
 - Export targets, the entry point, x64 runtime-function/unwind records, and direct branch/call targets create evidence-labelled `candidate_functions`; none alone proves source-level function identity. Conflicting ranges are marked ambiguous. Possible thunks, tail calls, jump tables, cold fragments, inlining, code/data overlap, and indirect control flow may remain incomplete.
 - `fragments`, `unresolved_ranges`, and `unresolved_control_flow` are separate from known/candidate functions. Confidence is evidence strength, not a probability of exactness. The annotated text and JSON report do not claim that all code has been found.
 - Gate 2's versioned benchmark and exact-start/exact-range precision/recall thresholds are recorded in [`tests/benchmarks/v1`](../tests/benchmarks/v1/). Its checked-in numeric baseline is the stated Clang/LLD corpus only; it is not a claim about arbitrary binaries or untested compiler families.
+
+## Dataflow, ABI, types, and structuring (Phase 4)
+
+- `dataflow_analysis` is a separate bounded stage for native PE32+ AMD64 using Microsoft x64 ABI assumptions. Managed images and other architectures receive an `unsupported` stage result.
+- Stack recovery tracks entry-relative RSP/RBP adjustments, observed stack slots, widths, and read/write counts. Dynamic alignment and unknown stack-pointer updates do not receive fabricated depths; partial reasons remain in `issues`.
+- Register arguments use RCX/RDX/R8/R9 evidence (first read before local write); stack overflow arguments use entry-RSP offsets beginning at +40. An unconditional in-range tail branch can forward argument locations only when the caller did not write the relevant register. Linear register reaching-definitions are explicitly not path-sensitive.
+- A matching, decoded PDB TPI procedure type can supply parameter count, scalar/pointer types, and return type with debug provenance. Otherwise the inferred locations may be present, but types and returns stay `unknown`. Import prototypes come from the finite `windows_sdk_prototype_catalog_v1` list; uncatalogued imports remain unknown. PDB class/UDT layouts, RTTI/vtable hierarchies, and general aggregate type inference are not implemented.
+- Call-argument flows carry call-site RVA, argument ABI register, last observed local definition or entry-value source, evidence, and confidence. Values may be wrong at control-flow joins; no path-sensitive SSA claim is made.
+- A conditional region is recovered only when two resolved CFG successors share a reachable join; a natural loop requires a backward edge whose target dominates its source. Switch tables, irreducible flow, and ambiguous structure stay in lower-level CFG/disassembly.
+- Pseudocode retains instruction RVA comments and unknown/unsupported operations. It is a review aid, not original source, not guaranteed compilable, and not an equivalence claim.
+- Gate 4 metrics use the hash-identified fixtures in [`phase4-ground-truth.json`](../tests/benchmarks/v1/phase4-ground-truth.json). `tests/phase4_benchmark.py` reports signature-location and type precision/recall; unknown types are false negatives. The O2 fixture is held out for expected-calibration-error scoring. CTest writes `build/phase4-benchmark-results.json`, uploaded by CI. Fixtures are parsed as data and never executed.
 
 ## Exit codes
 

@@ -96,6 +96,10 @@ struct PdbFunctionSymbol {
     std::uint32_t start_rva = 0;
     std::optional<std::uint32_t> end_rva;
     std::optional<std::uint32_t> type_index;
+    std::string type_status = "unknown";
+    std::string return_type = "unknown";
+    std::vector<std::string> parameter_types;
+    std::string type_provenance;
     std::string provenance;
     double confidence = 1.0;
 };
@@ -253,15 +257,119 @@ struct SemanticAnalysisRecord {
     ReferenceComparisonRecord reference;
 };
 
+struct Phase4Evidence {
+    std::string source;
+    std::string description;
+    double confidence = 0.0;
+};
+
+struct RecoveredVariable {
+    std::string name;
+    std::string storage = "unknown";
+    std::optional<std::int64_t> stack_offset;
+    std::string reg;
+    std::uint8_t size = 0;
+    std::string type = "unknown";
+    double confidence = 0.0;
+    std::uint64_t read_count = 0;
+    std::uint64_t write_count = 0;
+    std::vector<Phase4Evidence> evidence;
+};
+
+struct AbiParameterRecord {
+    std::uint32_t index = 0;
+    std::string location = "unknown";
+    std::string reg;
+    std::optional<std::int64_t> stack_offset;
+    std::string type = "unknown";
+    std::string type_status = "unknown";
+    double confidence = 0.0;
+    std::vector<Phase4Evidence> evidence;
+};
+
+struct FunctionSignatureRecord {
+    std::uint32_t function_start_rva = 0;
+    std::string label;
+    std::string status = "partial";
+    std::string calling_convention = "Microsoft x64";
+    std::string return_type = "unknown";
+    std::string return_type_status = "unknown";
+    double confidence = 0.0;
+    std::vector<Phase4Evidence> evidence;
+    std::vector<AbiParameterRecord> parameters;
+};
+
+struct StackFrameRecord {
+    std::uint32_t function_start_rva = 0;
+    std::string status = "partial";
+    bool has_frame_pointer = false;
+    std::string frame_pointer_register;
+    std::optional<std::uint64_t> max_stack_depth_bytes_below_entry_rsp;
+    std::vector<RecoveredVariable> variables;
+    std::vector<std::string> issues;
+};
+
+struct CallArgumentFlowRecord {
+    std::uint32_t caller_start_rva = 0;
+    std::uint32_t call_rva = 0;
+    std::optional<std::uint32_t> target_rva;
+    std::string callee;
+    std::uint32_t parameter_index = 0;
+    std::string argument_register;
+    std::string source_kind = "unknown";
+    std::string source_description;
+    std::optional<std::uint32_t> source_rva;
+    double confidence = 0.0;
+    std::vector<Phase4Evidence> evidence;
+};
+
+struct ImportedCallRecord {
+    std::uint32_t caller_start_rva = 0;
+    std::uint32_t call_rva = 0;
+    std::uint32_t iat_rva = 0;
+    std::string library;
+    std::string name;
+    std::string prototype_status = "unknown";
+    std::string return_type = "unknown";
+    std::vector<std::string> parameter_types;
+    std::string prototype_source;
+    double confidence = 0.0;
+    std::vector<CallArgumentFlowRecord> arguments;
+};
+
+struct ControlStructureRecord {
+    std::uint32_t function_start_rva = 0;
+    std::string kind;
+    std::string status = "partial";
+    std::optional<std::uint32_t> test_rva;
+    std::optional<std::uint32_t> join_block;
+    std::vector<std::uint32_t> block_ids;
+    double confidence = 0.0;
+    std::string reason;
+    std::vector<Phase4Evidence> evidence;
+};
+
+struct Phase4AnalysisRecord {
+    std::string status = "partial";
+    std::string backend = "nexusrev-x64-microsoft-abi-phase4-v1";
+    std::string abi = "Microsoft x64";
+    std::vector<StackFrameRecord> stack_frames;
+    std::vector<FunctionSignatureRecord> signatures;
+    std::vector<CallArgumentFlowRecord> call_argument_flows;
+    std::vector<ImportedCallRecord> imported_calls;
+    std::vector<ControlStructureRecord> control_structures;
+    std::vector<std::string> limitations;
+};
+
 struct AnalysisReport {
-    int schema_version = 4;
+    int schema_version = 5;
     std::string status = "failed";
     std::string start_status = "running";
     int exit_code = 0;
     std::string input_path;
     std::string input_sha256;
     std::string tool_version;
-    int configuration_version = 3;
+    int configuration_version = 4;
     std::string lief_version;
     std::string capstone_version;
     std::vector<StageRecord> stages;
@@ -274,6 +382,7 @@ struct AnalysisReport {
     SymbolProviderRecord symbols;
     FunctionRecoveryRecord function_recovery;
     SemanticAnalysisRecord semantic_analysis;
+    Phase4AnalysisRecord phase4_analysis;
 };
 
 class Decompiler {
