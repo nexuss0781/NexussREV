@@ -250,7 +250,17 @@ def main():
                 else:
                     truth_report = analyze(program, image, work, pdb)
                     if truth_report["symbols"]["status"] != "matched":
-                        raise SystemExit(f"{args.mode} {image.name}: matching PDB was not accepted")
+                        rejected_report = output.parent / f"{args.mode}-{image.stem}-rejected-pdb-report.json"
+                        rejected_report.write_text(json.dumps(truth_report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                        symbol_report = truth_report["symbols"]
+                        raise SystemExit(
+                            f"{args.mode} {image.name}: matching PDB was not accepted; "
+                            f"status={symbol_report.get('status')}; "
+                            f"expected_identity={symbol_report.get('expected_identity')}; "
+                            f"observed_identity={symbol_report.get('observed_identity')}; "
+                            f"diagnostics={symbol_report.get('diagnostics')}; "
+                            f"report={rejected_report}"
+                        )
                     truth = truth_report["symbols"]["functions"]
                     if not truth:
                         raise SystemExit(f"{args.mode} {image.name}: matching PDB has no supported procedure records")
