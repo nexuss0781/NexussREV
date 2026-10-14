@@ -100,6 +100,8 @@ A phase is complete only when its exit gate is satisfied in CI and its artifacts
 - Decoder results match expected instruction bytes and addresses on checked-in compiler-generated fixtures; every undecoded interval is reported.
 - No symbol count or heuristic byte estimate is presented as code coverage.
 
+**Gate 1 status: COMPLETE.** The implementation is in commit `0abaa03`. The sanitizer-enabled, warnings-as-errors Linux build and both local CTest targets passed; schema v2 validates native, compiler-generated, CLR, and alternate-machine reports. GitHub Actions [run 38547827430](https://github.com/nexuss0781/NexussREV/actions/runs/38547827430) passed Linux x64 and Windows x64 build/test jobs. The compiler-generated fixture asserts exact instruction bytes/addresses and Capstone detail. No input executable was launched.
+
 ### Phase 2 — Evidence-based symbol and function-boundary recovery
 
 **Upgrade areas**
