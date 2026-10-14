@@ -1,4 +1,4 @@
-name: Phase 1 CI
+name: Phase 1/2 CI
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   linux-x64:
-    name: Linux x64 build and tests
+    name: Linux x64 build and tests (Phase 1/2)
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -38,7 +38,7 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   windows-x64:
-    name: Windows x64 build and tests
+    name: Windows x64 build and tests (Phase 1/2)
     runs-on: windows-2022
     timeout-minutes: 45
     steps:

@@ -27,14 +27,16 @@ struct CliOptions {
     std::string input_path;
     std::string output_path;
     std::string report_path;
+    std::string pdb_path;
     std::string format = "disassembly";
 };
 
 void print_usage(std::ostream& output, const char* executable) {
     output << "Usage: " << executable
-           << " [--format disassembly] [--report-json <path>] <input.exe> <output>\n"
+           << " [--format disassembly] [--report-json <path>] [--pdb <matching.pdb>] <input.exe> <output>\n"
            << "       " << executable << " --help\n\n"
-           << "The two-path form is the compatibility mode. Phase 1 analyzes native PE32+ x86-64.\n"
+           << "The two-path form is the compatibility mode. Native PE32+ x86-64 receives bounded decode and function-boundary analysis.\n"
+           << "A PDB is used only when its GUID and age match the PE CodeView identity; otherwise it is reported and ignored.\n"
            << "Output is annotated disassembly, not original source code or guaranteed compilable C/C++.\n"
            << "Unsupported architectures and CLR/.NET images are identified, not decoded as x64. A JSON report is\n"
            << "written to <output>.report.json unless --report-json is specified.\n";
@@ -76,6 +78,14 @@ bool parse_arguments(int argc, char** argv, CliOptions& options, bool& show_help
             options.report_path = argv[++index];
             continue;
         }
+        if (argument == "--pdb") {
+            if (index + 1 >= argc) {
+                error = "--pdb requires a path";
+                return false;
+            }
+            options.pdb_path = argv[++index];
+            continue;
+        }
         if (argument.rfind("--", 0) == 0) {
             error = "unknown option: " + argument;
             return false;
@@ -101,6 +111,12 @@ bool parse_arguments(int argc, char** argv, CliOptions& options, bool& show_help
     if (normalized_absolute_path(options.output_path) == normalized_input ||
         normalized_absolute_path(options.report_path) == normalized_input) {
         error = "output and report paths must not overwrite the input file";
+        return false;
+    }
+    if (!options.pdb_path.empty() &&
+        (normalized_absolute_path(options.output_path) == normalized_absolute_path(options.pdb_path) ||
+         normalized_absolute_path(options.report_path) == normalized_absolute_path(options.pdb_path))) {
+        error = "output and report paths must not overwrite the supplied PDB";
         return false;
     }
     return true;
@@ -212,7 +228,7 @@ int main(int argc, char** argv) {
             print_diagnostics(report);
             return kInputFailure;
         }
-        if (!decompiler.analyze(report)) {
+        if (!decompiler.analyze(report, options.pdb_path)) {
             print_diagnostics(report);
             return kAnalysisFailure;
         }

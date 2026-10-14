@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "sha256.hpp"
+#include "phase2.hpp"
 
 #ifndef NEXUSREV_VERSION
 #define NEXUSREV_VERSION "0.1.0"
@@ -373,9 +374,52 @@ void decode_sections(AnalysisReport& report, csh handle) {
         diagnostic(report, "DECODE_GAPS_PRESENT", "warning", "some executable bytes were rejected by the decoder; exact intervals and byte values are reported");
     if (report.decode.executable_zero_fill_bytes != 0U)
         diagnostic(report, "EXECUTABLE_ZERO_FILL_PRESENT", "info", "virtual zero-fill has no source-file bytes and was not decoded");
-    diagnostic(report, "FUNCTION_RECOVERY_NOT_IMPLEMENTED", "info", "this phase reports PE and instruction evidence; function boundaries and semantic decompilation remain out of scope");
+    diagnostic(report, "SEMANTIC_LIFTING_NOT_IMPLEMENTED", "info", "Phase 2 reports evidence-backed function candidates; semantic lifting and source-level decompilation remain out of scope");
     report.stages.push_back({"analysis", "partial"});
     report.status = "partial";
+}
+
+void emit_diagnostics_json(std::ostringstream& output, const std::vector<Diagnostic>& diagnostics) {
+    output << '[';
+    for (std::size_t i = 0; i < diagnostics.size(); ++i) {
+        const auto& item = diagnostics[i];
+        output << (i ? "," : "") << "{\"code\":\"" << escape_json(item.code)
+               << "\",\"severity\":\"" << escape_json(item.severity)
+               << "\",\"message\":\"" << escape_json(item.message) << "\"}";
+    }
+    output << ']';
+}
+
+void emit_function_records_json(std::ostringstream& output, const std::vector<FunctionRecord>& records) {
+    output << '[';
+    for (std::size_t i = 0; i < records.size(); ++i) {
+        const auto& record = records[i];
+        output << (i ? "," : "") << "{\"entity_kind\":\"" << escape_json(record.entity_kind)
+               << "\",\"boundary_status\":\"" << escape_json(record.boundary_status)
+               << "\",\"start_rva\":" << record.start_rva << ",\"end_rva\":";
+        if (record.end_rva) output << *record.end_rva; else output << "null";
+        output << ",\"file_offset\":";
+        if (record.file_offset) output << *record.file_offset; else output << "null";
+        output << ",\"label\":\"" << escape_json(record.label) << "\",\"aliases\":[";
+        for (std::size_t j = 0; j < record.aliases.size(); ++j)
+            output << (j ? "," : "") << "\"" << escape_json(record.aliases[j]) << "\"";
+        output << "],\"confidence\":" << record.confidence << ",\"ambiguous\":"
+               << (record.ambiguous ? "true" : "false") << ",\"evidence\":[";
+        for (std::size_t j = 0; j < record.evidence.size(); ++j) {
+            const auto& evidence = record.evidence[j];
+            output << (j ? "," : "") << "{\"source\":\"" << escape_json(evidence.source)
+                   << "\",\"description\":\"" << escape_json(evidence.description)
+                   << "\",\"confidence\":" << evidence.confidence << ",\"reference_rva\":";
+            if (evidence.reference_rva) output << *evidence.reference_rva; else output << "null";
+            output << ",\"start_rva\":";
+            if (evidence.start_rva) output << *evidence.start_rva; else output << "null";
+            output << ",\"end_rva\":";
+            if (evidence.end_rva) output << *evidence.end_rva; else output << "null";
+            output << '}';
+        }
+        output << "]}";
+    }
+    output << ']';
 }
 
 std::string make_json(const AnalysisReport& r) {
@@ -495,7 +539,60 @@ std::string make_json(const AnalysisReport& r) {
         o << ",\"size\":" << x.size << ",\"bytes\":\"" << x.bytes
           << "\",\"reason\":\"" << escape_json(x.reason) << "\"}";
     }
-    o << "]},\n  \"stages\":[";
+    o << "]},\n  \"symbols\":{\"status\":\"" << escape_json(r.symbols.status)
+      << "\",\"requested_path\":\"" << escape_json(r.symbols.requested_path)
+      << "\",\"resolved_path\":\"" << escape_json(r.symbols.resolved_path)
+      << "\",\"expected_identity\":{\"guid\":\"" << escape_json(r.symbols.expected_guid)
+      << "\",\"age\":" << r.symbols.expected_age << "},\"observed_identity\":{\"guid\":\""
+      << escape_json(r.symbols.observed_guid) << "\",\"age\":" << r.symbols.observed_age
+      << "},\"functions\":[";
+    for (std::size_t i = 0; i < r.symbols.functions.size(); ++i) {
+        const auto& symbol = r.symbols.functions[i];
+        o << (i ? "," : "") << "{\"name\":\"" << escape_json(symbol.name)
+          << "\",\"start_rva\":" << symbol.start_rva << ",\"end_rva\":";
+        if (symbol.end_rva) o << *symbol.end_rva; else o << "null";
+        o << ",\"type_index\":";
+        if (symbol.type_index) o << *symbol.type_index; else o << "null";
+        o << ",\"provenance\":\"" << escape_json(symbol.provenance)
+          << "\",\"confidence\":" << symbol.confidence << '}';
+    }
+    o << "],\"diagnostics\":";
+    emit_diagnostics_json(o, r.symbols.diagnostics);
+    o << "},\n  \"function_recovery\":{\"status\":\"" << escape_json(r.function_recovery.status)
+      << "\",\"known_functions\":";
+    emit_function_records_json(o, r.function_recovery.known_functions);
+    o << ",\"candidate_functions\":";
+    emit_function_records_json(o, r.function_recovery.candidate_functions);
+    o << ",\"fragments\":";
+    emit_function_records_json(o, r.function_recovery.fragments);
+    o << ",\"unresolved_ranges\":[";
+    for (std::size_t i = 0; i < r.function_recovery.unresolved_ranges.size(); ++i) {
+        const auto& range = r.function_recovery.unresolved_ranges[i];
+        o << (i ? "," : "") << "{\"section_index\":" << range.section_index
+          << ",\"start_rva\":" << range.start_rva << ",\"end_rva\":" << range.end_rva
+          << ",\"reason\":\"" << escape_json(range.reason) << "\"}";
+    }
+    o << "],\"unresolved_control_flow\":[";
+    for (std::size_t i = 0; i < r.function_recovery.unresolved_control_flow.size(); ++i) {
+        const auto& flow = r.function_recovery.unresolved_control_flow[i];
+        o << (i ? "," : "") << "{\"from_rva\":" << flow.from_rva << ",\"target_rva\":";
+        if (flow.target_rva) o << *flow.target_rva; else o << "null";
+        o << ",\"flow_kind\":\"" << escape_json(flow.flow_kind)
+          << "\",\"reason\":\"" << escape_json(flow.reason) << "\"}";
+    }
+    std::size_t bounded = 0U, ambiguous = 0U;
+    for (const auto* records : {&r.function_recovery.known_functions, &r.function_recovery.candidate_functions,
+                                &r.function_recovery.fragments}) {
+        for (const auto& record : *records) {
+            if (record.end_rva) ++bounded;
+            if (record.ambiguous) ++ambiguous;
+        }
+    }
+    o << "],\"metrics\":{\"known_function_count\":" << r.function_recovery.known_functions.size()
+      << ",\"candidate_function_count\":" << r.function_recovery.candidate_functions.size()
+      << ",\"fragment_count\":" << r.function_recovery.fragments.size()
+      << ",\"bounded_range_count\":" << bounded << ",\"ambiguous_range_count\":" << ambiguous
+      << ",\"unresolved_range_count\":" << r.function_recovery.unresolved_ranges.size() << "}},\n  \"stages\":[";
     for (std::size_t i=0; i<r.stages.size(); ++i) o << (i?",":"") << "{\"name\":\"" << escape_json(r.stages[i].name) << "\",\"status\":\"" << escape_json(r.stages[i].status) << "\"}";
     o << "],\n  \"diagnostics\":[";
     for (std::size_t i=0; i<r.diagnostics.size(); ++i) { const auto& d=r.diagnostics[i]; o << (i?",":"") << "{\"code\":\"" << escape_json(d.code)
@@ -541,7 +638,7 @@ bool Decompiler::load_binary(const std::string& path, AnalysisReport& report) {
     return true;
 }
 
-bool Decompiler::analyze(AnalysisReport& report) {
+bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path) {
     if (!image_.file_bytes) {
         diagnostic(report, "ANALYSIS_WITHOUT_INPUT", "error", "analysis requires a validated PE image");
         report.stages.push_back({"analysis", "failed"}); report.status = "failed"; return false;
@@ -566,6 +663,7 @@ bool Decompiler::analyze(AnalysisReport& report) {
         diagnostic(report, "DECODER_DETAIL_FAILED", "error", "unable to enable Capstone instruction details"); return false;
     }
     decode_sections(report, capstone_handle_);
+    if (report.status != "failed") recover_functions(report, pdb_path);
     return report.status != "failed";
 }
 
@@ -593,7 +691,30 @@ std::string Decompiler::emit_annotated_disassembly(const AnalysisReport& r) cons
       << " debug=" << r.pe.debug_entries.size() << " runtime-functions=" << r.pe.runtime_functions.size() << " TLS=" << (r.pe.has_tls?"yes":"no")
       << " CLR=" << (r.pe.clr.present?"yes":"no") << "\nDecode accounting: executable file-backed=" << r.decode.executable_file_backed_bytes
       << " processed=" << r.decode.processed_bytes << " decoded=" << r.decode.decoded_bytes << " undecoded=" << r.decode.undecoded_bytes
-      << " zero-fill=" << r.decode.executable_zero_fill_bytes << " limited=" << r.decode.limited_bytes << "\n\n";
+      << " zero-fill=" << r.decode.executable_zero_fill_bytes << " limited=" << r.decode.limited_bytes << "\n"
+      << "Symbol provider: " << r.symbols.status << " (" << r.symbols.functions.size() << " procedure records)\n"
+      << "Function-boundary evidence: known=" << r.function_recovery.known_functions.size()
+      << " candidates=" << r.function_recovery.candidate_functions.size()
+      << " fragments=" << r.function_recovery.fragments.size()
+      << " unresolved-ranges=" << r.function_recovery.unresolved_ranges.size() << "\n";
+    const auto emit_function_group = [&o](const std::string& heading, const std::vector<FunctionRecord>& records) {
+        o << heading << ":\n";
+        if (records.empty()) o << "  none\n";
+        for (const auto& record : records) {
+            o << "  " << (record.label.empty() ? "<unlabelled>" : record.label) << " RVA=0x"
+              << std::hex << record.start_rva << "-";
+            if (record.end_rva) o << "0x" << *record.end_rva; else o << "unknown";
+            o << std::dec << " confidence=" << record.confidence << " boundary=" << record.boundary_status
+              << (record.ambiguous ? " ambiguous" : "") << " evidence=";
+            for (std::size_t i = 0; i < record.evidence.size(); ++i)
+                o << (i ? "," : "") << record.evidence[i].source;
+            o << "\n";
+        }
+    };
+    emit_function_group("Known functions", r.function_recovery.known_functions);
+    emit_function_group("Candidate functions", r.function_recovery.candidate_functions);
+    emit_function_group("Fragments", r.function_recovery.fragments);
+    o << "\n";
     for (const auto& x : r.instructions) {
         const std::string name = x.section_index < r.pe.sections.size() ? r.pe.sections[x.section_index].name : "?";
         o << name << " RVA=0x" << std::hex << std::setw(8) << std::setfill('0') << x.rva << " VA=0x" << std::setw(16) << x.va

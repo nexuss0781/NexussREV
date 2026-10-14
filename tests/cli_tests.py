@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 1 CLI acceptance tests over deterministic synthetic and compiler-built PE fixtures."""
+"""Phase 1/2 CLI acceptance tests over deterministic PE and PDB fixtures."""
 
 import argparse
 import hashlib
@@ -16,7 +16,7 @@ def run(program, *arguments):
         capture_output=True,
         text=True,
         check=False,
-        timeout=15,
+        timeout=20,
     )
 
 
@@ -26,12 +26,17 @@ def main():
     parser.add_argument("--fixture", required=True, type=pathlib.Path)
     parser.add_argument("--generator", required=True, type=pathlib.Path)
     parser.add_argument("--compiler-fixture", required=True, type=pathlib.Path)
+    parser.add_argument("--phase2-fixtures", required=True, type=pathlib.Path)
+    parser.add_argument("--schema", required=True, type=pathlib.Path)
     args = parser.parse_args()
 
+    schema = json.loads(args.schema.read_text(encoding="utf-8"))
+    assert schema["properties"]["schema_version"]["const"] == 3
     help_result = run(args.program, "--help")
     assert help_result.returncode == 0, help_result.stderr
     assert "not original source code" in help_result.stdout
     assert "PE32+ x86-64" in help_result.stdout
+    assert "--pdb" in help_result.stdout
     fixture_hash = hashlib.sha256(args.fixture.read_bytes()).hexdigest()
     overwrite_result = run(args.program, args.fixture, args.fixture)
     assert overwrite_result.returncode == 2
@@ -80,17 +85,17 @@ def main():
         report_path = pathlib.Path(str(valid_output) + ".report.json")
         assert report_path.is_file()
         report = json.loads(report_path.read_text(encoding="utf-8"))
-        assert report["schema_version"] == 2
+        assert report["schema_version"] == 3
         assert report["status"] == "partial"
         assert report["run"] == {
             "start_status": "running",
             "end_status": "partial",
             "exit_code": 0,
         }
-        assert report["tool"]["configuration_version"] == 1
+        assert report["tool"]["configuration_version"] == 2
         assert report["input"]["sha256"] == fixture_hash
         assert [stage["name"] for stage in report["stages"]] == [
-            "parse", "analysis", "emission"
+            "parse", "analysis", "symbol_provider", "function_recovery", "emission"
         ]
         assert all(
             stage["status"] in {"complete", "partial", "unsupported", "failed"}
@@ -103,6 +108,8 @@ def main():
         }
         assert report["decode"]["decoded_bytes"] == report["decode"]["executable_file_backed_bytes"]
         assert report["decode"]["instructions"]
+        assert report["symbols"]["status"] == "not_present"
+        assert report["function_recovery"]["candidate_functions"]
         output_text = valid_output.read_text(encoding="utf-8")
         assert "not original source code" in output_text
         assert "RVA=0x" in output_text and "FILE=0x" in output_text
@@ -168,6 +175,68 @@ def main():
         assert first_detail["operands"][1]["type"] == "memory"
         assert first_detail["operands"][1]["base"] == "rcx"
         assert first_detail["operands"][1]["index"] == "rdx"
+
+        pdb_dll = args.phase2_fixtures / "pdb-sample.dll"
+        pdb_output = root / "pdb-backed.disasm"
+        pdb_result = run(args.program, pdb_dll, pdb_output)
+        assert pdb_result.returncode == 0, pdb_result.stderr
+        pdb_report = json.loads(pathlib.Path(str(pdb_output) + ".report.json").read_text(encoding="utf-8"))
+        assert pdb_report["symbols"]["status"] == "matched"
+        assert pdb_report["symbols"]["expected_identity"] == pdb_report["symbols"]["observed_identity"]
+        assert {item["name"] for item in pdb_report["symbols"]["functions"]} == {
+            "add_one", "call_add", "call_helper", "private_helper"
+        }
+        assert all(item["provenance"] == "pdb_procedure_record" and item["type_index"] is not None
+                   for item in pdb_report["symbols"]["functions"])
+        known = pdb_report["function_recovery"]["known_functions"]
+        assert len(known) == 4
+        assert all(any(evidence["source"] == "pdb_procedure_record" for evidence in item["evidence"])
+                   for item in known)
+        assert not pdb_report["function_recovery"]["candidate_functions"]
+        pdb_text = pdb_output.read_text(encoding="utf-8")
+        assert "Symbol provider: matched (4 procedure records)" in pdb_text
+        assert "Known functions:" in pdb_text and "pdb_procedure_record" in pdb_text
+
+        mismatch_output = root / "pdb-mismatch.disasm"
+        mismatch_result = run(args.program, "--pdb", args.phase2_fixtures / "pdb-sample-o2.pdb",
+                              pdb_dll, mismatch_output)
+        assert mismatch_result.returncode == 0, mismatch_result.stderr
+        mismatch_report = json.loads(pathlib.Path(str(mismatch_output) + ".report.json").read_text(encoding="utf-8"))
+        assert mismatch_report["symbols"]["status"] == "mismatched"
+        assert mismatch_report["symbols"]["functions"] == []
+        assert not mismatch_report["function_recovery"]["known_functions"]
+        assert any(item["code"] == "PDB_IDENTITY_MISMATCH" for item in mismatch_report["diagnostics"])
+
+        stripped_dll = args.phase2_fixtures / "stripped" / "pdb-sample-stripped.dll"
+        stripped_output = root / "stripped.disasm"
+        stripped_result = run(args.program, stripped_dll, stripped_output)
+        assert stripped_result.returncode == 0, stripped_result.stderr
+        stripped_report = json.loads(pathlib.Path(str(stripped_output) + ".report.json").read_text(encoding="utf-8"))
+        assert stripped_report["symbols"]["status"] == "not_present"
+        assert not stripped_report["function_recovery"]["known_functions"]
+        stripped_candidates = stripped_report["function_recovery"]["candidate_functions"]
+        assert len(stripped_candidates) == 4
+        assert all(any(evidence["source"] == "x64_unwind_range" for evidence in item["evidence"])
+                   for item in stripped_candidates)
+        assert all(item["end_rva"] is not None for item in stripped_candidates)
+        stripped_text = stripped_output.read_text(encoding="utf-8")
+        assert "Candidate functions:" in stripped_text and "x64_unwind_range" in stripped_text
+
+        missing_pdb_output = root / "pdb-missing.disasm"
+        missing_pdb = run(args.program, "--pdb", root / "absent.pdb", pdb_dll, missing_pdb_output)
+        assert missing_pdb.returncode == 0
+        missing_pdb_report = json.loads(pathlib.Path(str(missing_pdb_output) + ".report.json").read_text(encoding="utf-8"))
+        assert missing_pdb_report["symbols"]["status"] == "missing"
+        bad_pdb = root / "bad.pdb"
+        bad_pdb.write_bytes(b"not a PDB")
+        bad_pdb_output = root / "pdb-invalid.disasm"
+        invalid_pdb = run(args.program, "--pdb", bad_pdb, pdb_dll, bad_pdb_output)
+        assert invalid_pdb.returncode == 0
+        invalid_pdb_report = json.loads(pathlib.Path(str(bad_pdb_output) + ".report.json").read_text(encoding="utf-8"))
+        assert invalid_pdb_report["symbols"]["status"] == "invalid"
+        protected = run(args.program, "--pdb", args.phase2_fixtures / "pdb-sample.pdb",
+                        pdb_dll, args.phase2_fixtures / "pdb-sample.pdb")
+        assert protected.returncode == 2
 
         clr = generate("managed-x64.exe", "--clr")
         clr_output = root / "managed.disasm"

@@ -116,6 +116,10 @@ A phase is complete only when its exit gate is satisfied in CI and its artifacts
 - On labelled fixtures, report precision and recall for function starts/ranges separately for symbol-backed and stripped cases. Set thresholds from the checked-in baseline and raise them only with reviewed benchmark evidence.
 - Every discovered range has provenance; ambiguous boundaries remain explicitly ambiguous. No failed discovery is silently counted as a recovered function.
 
+**Phase 2 implementation status (2026-10-14): IMPLEMENTED; Gate 2 benchmark passes for the checked-in v1 corpus.** Schema v3 and the optional MSF 7.0 PDB reader validate CodeView GUID/age before consuming procedure records. PDB labels/ranges, exports, entry point, x64 runtime-function ranges, and conservative direct-flow targets are kept as evidence; known functions, candidates, fragments, unresolved executable ranges, and unresolved control flow remain distinct. The benchmark has eight labelled EXE/DLL cases (O0/O2, matching PDB/PDB-stripped) and records input/PDB/source hashes. The pinned Clang 18.1.3/LLD 18.1.3 baseline measures matching-PDB precision/recall of 1.000/1.000 for both starts and ranges; stripped precision/recall is 1.000/0.750 for starts and 1.000/0.625 for ranges. Sanitizer-enabled, warnings-as-errors Linux build and the unit, CLI, and benchmark tests passed locally; input PE fixtures were not executed.
+
+**Coverage limitation:** this environment does not contain Microsoft `cl.exe`, `clang-cl`, or MinGW; the checked-in v1 numeric corpus is Clang/LLD COFF only. The eight-case corpus meets the local labelled-baseline and metric criteria, but it does **not** establish cross-toolchain metrics for the MSVC/clang-cl/MinGW variants listed in Upgrade Area 4. Do not claim cross-toolchain benchmark coverage until those variants are added and measured.
+
 ### Phase 3 — Semantic lifting and control-flow foundation
 
 **Upgrade areas**

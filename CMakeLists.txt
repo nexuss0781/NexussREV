@@ -15,6 +15,7 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_executable(nexusrev
     src/main.cpp
     src/phase1.cpp
+    src/phase2.cpp
     src/pe_image.cpp
     src/sha256.cpp
 )
@@ -63,5 +64,17 @@ add_test(
             --fixture ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/minimal-pe-x64.exe
             --generator ${CMAKE_CURRENT_SOURCE_DIR}/tests/make_phase1_fixture.py
             --compiler-fixture ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/compiler-generated-x64.exe
+            --phase2-fixtures ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/phase2
+            --schema ${CMAKE_CURRENT_SOURCE_DIR}/docs/analysis-report.schema.json
 )
-set_tests_properties(nexusrev_cli_tests PROPERTIES TIMEOUT 30)
+set_tests_properties(nexusrev_cli_tests PROPERTIES TIMEOUT 60)
+
+add_test(
+    NAME nexusrev_phase2_benchmark
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/phase2_benchmark.py
+            --program $<TARGET_FILE:nexusrev>
+            --manifest ${CMAKE_CURRENT_SOURCE_DIR}/tests/benchmarks/v1/corpus.json
+            --baseline ${CMAKE_CURRENT_SOURCE_DIR}/tests/benchmarks/v1/baseline.json
+            --output ${CMAKE_CURRENT_BINARY_DIR}/phase2-benchmark-results.json
+)
+set_tests_properties(nexusrev_phase2_benchmark PROPERTIES TIMEOUT 120)
