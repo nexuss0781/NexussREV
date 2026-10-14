@@ -75,6 +75,7 @@
         "distribution": "Original NexussREV fixture source."
       },
       "reference_report": "compiler-generated-x64-ghidra-11.3.2.tsv",
+      "reference_hash_normalization": "CRLF_TO_LF",
       "reference_sha256": "0425da3e22684d4afb47d7f7f44484acb0c73b7ad6a7e26f91c2a3a502fd65ee",
       "expected_reference_tool": "Ghidra",
       "expected_reference_version": "11.3.2",

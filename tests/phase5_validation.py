@@ -21,6 +21,12 @@ def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def normalized_sha256_bytes(content, normalization=None):
+    if normalization == "CRLF_TO_LF":
+        content = content.replace(b"\r\n", b"\n")
+    return hashlib.sha256(content).hexdigest()
+
+
 def ratio(numerator, denominator):
     """A zero denominator is unknown, never a perfect score."""
     if denominator == 0:
@@ -159,7 +165,9 @@ def evaluate_positive_sample(sample, fixture_root, program, validator, temp_root
     if sample.get("reference_report"):
         reference_path = (fixture_root / sample["reference_report"]).resolve()
         require(reference_path.is_file(), f"{sample_id}: missing reference report {reference_path}")
-        require(sha256(reference_path) == sample["reference_sha256"],
+        actual_reference_hash = normalized_sha256_bytes(
+            reference_path.read_bytes(), sample.get("reference_hash_normalization"))
+        require(actual_reference_hash == sample["reference_sha256"],
                 f"{sample_id}: reference report SHA-256 mismatch")
     output = temp_root / f"{sample_id}.disasm"
     _, completed, report, output, report_path = run_analysis(
@@ -430,6 +438,10 @@ def main():
     require(zero_denominator["value"] is None and
             zero_denominator["status"] == "not_measurable",
             "zero-denominator metrics must remain explicitly not_measurable")
+    canonical_reference_hash = hashlib.sha256(b"reference\tvalue\n").hexdigest()
+    require(normalized_sha256_bytes(b"reference\tvalue\r\n", "CRLF_TO_LF") ==
+            canonical_reference_hash,
+            "CRLF-to-LF reference identity normalization failed")
 
     corpus = json.loads(args.corpus.read_text(encoding="utf-8"))
     phase2_manifest = json.loads(args.phase2_manifest.read_text(encoding="utf-8"))
