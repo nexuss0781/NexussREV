@@ -31,4 +31,20 @@ The acceptance floors in `baseline.json` are set from this checked-in reference.
 
 ## Coverage boundary
 
-V1 is a **Clang/LLD COFF** corpus that includes the requested PE kinds, optimization profiles, symbol-backed inputs, and no-useful-symbols inputs. This environment cannot execute the proprietary MSVC toolchain and does not currently have MSVC, clang-cl, or MinGW fixture artifacts. Therefore the v1 numeric results must not be described as cross-toolchain measurements; compiler-family expansion remains a documented follow-up before claiming broader benchmark coverage.
+The checked-in numeric baseline above remains **Clang/LLD COFF**. The supplemental [`toolchain-matrix.json`](toolchain-matrix.json) and [`phase2_toolchain_benchmark.py`](../../phase2_toolchain_benchmark.py) define a second, generated matrix: eight cases per toolchain (O0/O2 × EXE/DLL × debug/stripped), original fixture source only, SHA-256 identities, exact compiler/linker versions, per-case truth, and grouped start/range precision and recall. Its thresholds are in the manifest and are checked by the runner.
+
+MSVC and clang-cl cases use each generated image's matching PDB as labeled function-boundary truth, then analyze a copy with export and debug-directory entries cleared. MinGW GCC does not produce PDBs; its debug-enabled companion uses DWARF `low_pc`/`high_pc` labels for the independent truth ranges, and its stripped copy removes debug data and export/debug directory entries. Reports mark these as `dwarf_present_no_pdb` or `stripped`; they must not be described as PDB-backed results.
+
+CI generates these binaries from `corpus.c`, analyzes them strictly as data (never executing them), and uploads per-toolchain JSON reports as workflow artifacts. The output records the actual runner compiler versions and hashes, making a run auditable even when hosted toolchain versions advance. The command forms are:
+
+```sh
+python3 tests/phase2_toolchain_benchmark.py \
+  --mode mingw --program build/nexusrev \
+  --compiler x86_64-w64-mingw32-gcc \
+  --objdump x86_64-w64-mingw32-objdump \
+  --strip x86_64-w64-mingw32-objcopy \
+  --matrix tests/benchmarks/v1/toolchain-matrix.json \
+  --output build/phase2-toolchain-matrix/mingw.json
+```
+
+On Windows CI, the same runner uses `--mode msvc --compiler cl.exe --linker link.exe` and `--mode clang-cl --compiler clang-cl.exe --linker lld-link.exe` with `build/Release/nexusrev.exe` and the same matrix manifest. Thus the static v1 Clang/LLD baseline and generated cross-toolchain measurements remain distinct and are not silently mixed.

@@ -1,0 +1,43 @@
+{
+  "format_version": 1,
+  "name": "NexussREV Phase 2 cross-toolchain boundary matrix",
+  "source": "../../fixtures/phase2/corpus.c",
+  "source_sha256": "9bbbf1c673ce7365a51b28d9a9cbe3b9cc9bea045baf718c856a65c1ba880d92",
+  "source_hash_normalization": "CRLF_TO_LF",
+  "source_functions": ["add_one", "call_add", "call_helper", "private_helper"],
+  "profiles": ["O0", "O2"],
+  "binary_kinds": ["DLL", "EXE"],
+  "variants_per_binary": ["debug", "stripped"],
+  "expected_cases_per_toolchain": 8,
+  "toolchains": {
+    "msvc": {
+      "compiler": "Microsoft Visual C++ cl.exe",
+      "linker": "Microsoft link.exe",
+      "truth_source": "procedure records from matching MSF PDB GUID/age"
+    },
+    "clang-cl": {
+      "compiler": "Clang clang-cl.exe",
+      "linker": "LLVM lld-link.exe",
+      "truth_source": "procedure records from matching MSF PDB GUID/age"
+    },
+    "mingw": {
+      "compiler": "MinGW-w64 GCC",
+      "linker": "GNU ld via the MinGW GCC driver",
+      "truth_source": "DWARF subprogram low_pc/high_pc in the debug-enabled companion; this toolchain does not emit PDBs"
+    }
+  },
+  "thresholds": {
+    "pdb_present": {
+      "starts": {"min_precision": 1.0, "min_recall": 1.0},
+      "ranges": {"min_precision": 1.0, "min_recall": 1.0}
+    },
+    "stripped": {
+      "starts": {"min_precision": 0.8, "min_recall": 0.5},
+      "ranges": {"min_precision": 0.8, "min_recall": 0.5}
+    },
+    "dwarf_present_no_pdb": {
+      "starts": {"min_precision": 0.8, "min_recall": 0.5},
+      "ranges": {"min_precision": 0.8, "min_recall": 0.5}
+    }
+  }
+}
