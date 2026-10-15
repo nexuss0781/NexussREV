@@ -9,6 +9,17 @@ NexussREV's vcpkg dependency resolution is anchored by `builtin-baseline` `e4563
 | LIEF | 0.17.6 | `Apache-2.0` | PE-format cross-check behind NexussREV's bounded loader |
 | Capstone | 5.0.9 | `BSD-3-Clause` | x86-64 instruction decoding |
 
+## Optional decoder cross-check (test-only)
+
+The `decoder-crosscheck` vcpkg feature is opt-in and is not part of the default production dependency graph. Its pinned packages and upstream license declarations are:
+
+| Component | Pinned version | SPDX license expression | Role / notice source |
+|---|---:|---|---|
+| Zydis | 4.1.1 (vcpkg port-version 1) | `MIT` | Independent decoder oracle for the optional Capstone cross-check tests; [upstream license](https://github.com/zyantific/zydis/blob/v4.1.1/LICENSE) |
+| Zycore-C | 1.5.2 | `MIT` | Zydis dependency; [upstream license](https://github.com/zyantific/zycore-c/blob/v1.5.2/LICENSE) |
+
+The pinned vcpkg ports declare both licenses and install each upstream `LICENSE` file as its package copyright notice under `share/zydis/copyright` and `share/zycore/copyright` in the vcpkg installed tree. The optional cross-check target is not installed, and CI produces the Capstone-only release package before enabling this feature in a separate build directory; thus the release bundle does not acquire a Zydis runtime dependency. NexussREV does not vendor or relicense either component. MIT permits redistribution subject to retaining the copyright and permission notices if a future product distribution includes either dependency.
+
 ## Transitive vcpkg components in the supported x64 builds
 
 The following licenses appear in the resolved vcpkg graph used by this repository. The exact component versions, target architecture, package relationships and declared license expressions are recorded from each build's installed vcpkg status database in its CycloneDX 1.6 SBOM.

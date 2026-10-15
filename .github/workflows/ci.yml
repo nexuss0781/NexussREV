@@ -51,6 +51,19 @@ jobs:
           archive="$(find build -maxdepth 1 -type f -name 'NexussREV-*.tar.gz' -print -quit)"
           test -n "$archive"
           python3 tests/package_smoke.py --archive "$archive" --installed-root build/vcpkg_installed --format tgz --platform linux-x64
+      - name: Configure optional Zydis decoder cross-check
+        run: >-
+          cmake -S . -B build-zydis
+          -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_INSTALLED_DIR="$GITHUB_WORKSPACE/build/vcpkg_installed"
+          -DVCPKG_MANIFEST_FEATURES=decoder-crosscheck
+          -DCMAKE_BUILD_TYPE=Release
+          -DNEXUSREV_ENABLE_ZYDIS_CROSSCHECK=ON
+          -DNEXUSREV_WARNINGS_AS_ERRORS=ON
+      - name: Build and run optional Zydis decoder cross-check
+        run: |
+          cmake --build build-zydis --target nexusrev_decoder_crosscheck --parallel 2
+          ctest --test-dir build-zydis -R '^nexusrev_decoder_crosscheck$' --output-on-failure
       - name: Build and run bounded Clang libFuzzer smoke
         shell: bash
         run: |
@@ -149,6 +162,21 @@ jobs:
           $archive = Get-ChildItem build -Filter 'NexussREV-*.zip' | Select-Object -First 1
           if (-not $archive) { throw "CPack ZIP package not found" }
           python tests/package_smoke.py --archive $archive.FullName --installed-root build/vcpkg_installed --format zip --platform windows-x64
+      - name: Configure optional Zydis decoder cross-check
+        shell: pwsh
+        run: >-
+          cmake -S . -B build-zydis -A x64
+          "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/build/vcpkg_installed"
+          -DVCPKG_MANIFEST_FEATURES=decoder-crosscheck
+          -DCMAKE_BUILD_TYPE=Release
+          -DNEXUSREV_ENABLE_ZYDIS_CROSSCHECK=ON
+          -DNEXUSREV_WARNINGS_AS_ERRORS=ON
+      - name: Build and run optional Zydis decoder cross-check
+        shell: pwsh
+        run: |
+          cmake --build build-zydis --config Release --target nexusrev_decoder_crosscheck --parallel 2
+          ctest --test-dir build-zydis -C Release -R '^nexusrev_decoder_crosscheck$' --output-on-failure
       - uses: actions/upload-artifact@v4
         if: always()
         with:

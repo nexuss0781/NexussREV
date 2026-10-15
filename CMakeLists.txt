@@ -4,6 +4,7 @@ project(NexussREV VERSION 0.1.0 LANGUAGES CXX)
 option(NEXUSREV_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(NEXUSREV_WARNINGS_AS_ERRORS "Treat project compiler warnings as errors" ON)
 option(NEXUSREV_BUILD_FUZZERS "Build the optional libFuzzer Phase 6 harness" OFF)
+option(NEXUSREV_ENABLE_ZYDIS_CROSSCHECK "Build the optional test-only Zydis decoder cross-check" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -126,6 +127,27 @@ set_tests_properties(nexusrev_phase5_validation PROPERTIES
     DEPENDS nexusrev_phase4_benchmark
     TIMEOUT 240
 )
+
+if(NEXUSREV_ENABLE_ZYDIS_CROSSCHECK)
+    find_package(zydis 4.1.1 CONFIG REQUIRED)
+    add_executable(nexusrev_decoder_crosscheck
+        tests/decoder_crosscheck.cpp
+        src/pe_image.cpp
+        src/sha256.cpp
+    )
+    target_include_directories(nexusrev_decoder_crosscheck PRIVATE include)
+    target_link_libraries(nexusrev_decoder_crosscheck PRIVATE
+        LIEF::LIEF capstone::capstone Zydis::Zydis Threads::Threads
+    )
+    nexusrev_apply_build_options(nexusrev_decoder_crosscheck)
+    add_test(
+        NAME nexusrev_decoder_crosscheck
+        COMMAND $<TARGET_FILE:nexusrev_decoder_crosscheck>
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/compiler-generated-x64.exe
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/compiler-generated-x64-ghidra-11.3.2.tsv
+    )
+    set_tests_properties(nexusrev_decoder_crosscheck PROPERTIES TIMEOUT 120)
+endif()
 
 include(GNUInstallDirs)
 if(UNIX AND NOT APPLE)
