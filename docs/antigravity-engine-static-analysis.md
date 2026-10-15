@@ -45,3 +45,20 @@ All six CTest gates pass; the Phase-10 report validates against the active JSON 
 
 - Phase-10 disassembly: `/workspace/downloads/antigravity/static-inspection/results/language-server-phase10.disasm`
 - Phase-10 JSON report: `/workspace/downloads/antigravity/static-inspection/results/language-server-phase10.disasm.report.json`
+
+## Phase 11 — RAM and serialization optimization with exact output
+
+For the same inert AMD64 PE (`language_server.exe`, SHA-256 `ecc463b48ba0a6902fe0975d6ef357d504038a1b818387f0868348d92fcccfbe`), same build mode (Release with ASan/UBSan enabled), and identical input/output paths, Phase 11 removes duplicate PE metadata ownership, scopes the optional LIEF parse object to the cross-check, and streams JSON through a fixed 8 KiB buffer with a strict 64 MiB cap. JSON escaping writes unchanged spans directly and preserves the existing control-byte and invalid-UTF-8 behavior. The disassembly and report remain staged, synced, and atomically published as before.
+
+| Measurement | Before Phase 11 | Phase 11 |
+|---|---:|---:|
+| Peak RSS | 939,400 KiB | 664,536 KiB |
+| Peak RSS change | — | −274,864 KiB (−29.3%) |
+| Wall time | 9.762 s | 9.697 s |
+| Disassembly | 2,419,527 bytes | 2,419,527 bytes; identical SHA-256 |
+| JSON report | 60,570,632 bytes | 60,570,632 bytes; identical SHA-256 |
+| Decoded instruction records | 20,000 | 20,000 |
+| Modeled / unsupported semantics | 19,718 / 282 | 19,718 / 282 |
+| Unresolved flow issues | 54 | 54 |
+
+The report validates against schema v6. All six CTest gates pass, including the frozen Phase 5 validation baseline. The fixed-seed 2,000-run libFuzzer+ASan+UBSan smoke completed without a crash or sanitizer finding. `README.md` remains byte-for-byte unchanged. Analysis remains bounded and partial: 20,000 instructions still cover only 0.134425% of executable file-backed bytes; no coverage or semantic claims were increased. Neither the installer nor the extracted executable was run.

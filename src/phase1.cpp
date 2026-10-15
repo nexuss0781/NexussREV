@@ -4,12 +4,14 @@
 #include <algorithm>
 #include <chrono>
 #include <csignal>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <streambuf>
 #include <string_view>
 #include <utility>
 
@@ -58,58 +60,75 @@ void add_stop_diagnostic(AnalysisReport& report, StopReason reason) {
     report.status = "failed";
 }
 
-std::string escape_json(const std::string& value) {
-    std::ostringstream result;
+struct JsonEscapedString {
+    const std::string& value;
+};
+
+JsonEscapedString escape_json(const std::string& value) { return {value}; }
+
+std::ostream& operator<<(std::ostream& result, JsonEscapedString escaped) {
     constexpr char hex[] = "0123456789abcdef";
-    std::size_t i = 0;
-    while (i < value.size()) {
-        const auto c = static_cast<unsigned char>(value[i]);
+    std::size_t i = 0U;
+    std::size_t run_start = 0U;
+    while (i < escaped.value.size()) {
+        const auto c = static_cast<unsigned char>(escaped.value[i]);
+        const char* replacement = nullptr;
+        std::size_t replacement_size = 0U;
         switch (c) {
-        case '"': result << "\\\""; ++i; continue;
-        case '\\': result << "\\\\"; ++i; continue;
-        case '\b': result << "\\b"; ++i; continue;
-        case '\f': result << "\\f"; ++i; continue;
-        case '\n': result << "\\n"; ++i; continue;
-        case '\r': result << "\\r"; ++i; continue;
-        case '\t': result << "\\t"; ++i; continue;
-        default:
-            if (c < 0x20U) {
-                result << "\\u00" << hex[(c >> 4U) & 15U] << hex[c & 15U];
-                ++i;
-                continue;
-            }
-            if (c < 0x80U) {
-                result << static_cast<char>(c);
-                ++i;
-                continue;
-            }
-            std::size_t length = c >= 0xc2U && c <= 0xdfU ? 2U :
-                                 c >= 0xe0U && c <= 0xefU ? 3U :
-                                 c >= 0xf0U && c <= 0xf4U ? 4U : 0U;
-            bool valid = length != 0U && i + length <= value.size();
+        case '"': replacement = "\\\""; replacement_size = 2U; break;
+        case '\\': replacement = "\\\\"; replacement_size = 2U; break;
+        case '\b': replacement = "\\b"; replacement_size = 2U; break;
+        case '\f': replacement = "\\f"; replacement_size = 2U; break;
+        case '\n': replacement = "\\n"; replacement_size = 2U; break;
+        case '\r': replacement = "\\r"; replacement_size = 2U; break;
+        case '\t': replacement = "\\t"; replacement_size = 2U; break;
+        default: break;
+        }
+        bool unicode_byte = false;
+        if (replacement == nullptr && c < 0x20U) {
+            unicode_byte = true;
+        } else if (replacement == nullptr && c >= 0x80U) {
+            const std::size_t length = c >= 0xc2U && c <= 0xdfU ? 2U :
+                                      c >= 0xe0U && c <= 0xefU ? 3U :
+                                      c >= 0xf0U && c <= 0xf4U ? 4U : 0U;
+            bool valid = length != 0U && i + length <= escaped.value.size();
             for (std::size_t j = 1U; valid && j < length; ++j) {
-                const auto continuation = static_cast<unsigned char>(value[i + j]);
+                const auto continuation = static_cast<unsigned char>(escaped.value[i + j]);
                 valid = continuation >= 0x80U && continuation <= 0xbfU;
             }
             if (valid && length == 3U) {
-                const auto second = static_cast<unsigned char>(value[i + 1U]);
+                const auto second = static_cast<unsigned char>(escaped.value[i + 1U]);
                 valid = (c != 0xe0U || second >= 0xa0U) && (c != 0xedU || second <= 0x9fU);
             }
             if (valid && length == 4U) {
-                const auto second = static_cast<unsigned char>(value[i + 1U]);
+                const auto second = static_cast<unsigned char>(escaped.value[i + 1U]);
                 valid = (c != 0xf0U || second >= 0x90U) && (c != 0xf4U || second <= 0x8fU);
             }
             if (valid) {
-                result.write(value.data() + static_cast<std::ptrdiff_t>(i), static_cast<std::streamsize>(length));
                 i += length;
-            } else {
-                result << "\\u00" << hex[(c >> 4U) & 15U] << hex[c & 15U];
-                ++i;
+                continue;
             }
+            unicode_byte = true;
+        } else if (replacement == nullptr) {
+            ++i;
             continue;
         }
+        if (i > run_start)
+            result.write(escaped.value.data() + static_cast<std::ptrdiff_t>(run_start),
+                         static_cast<std::streamsize>(i - run_start));
+        if (unicode_byte) {
+            char encoded[] = {'\\', 'u', '0', '0', hex[(c >> 4U) & 15U], hex[c & 15U]};
+            result.write(encoded, static_cast<std::streamsize>(sizeof(encoded)));
+        } else {
+            result.write(replacement, static_cast<std::streamsize>(replacement_size));
+        }
+        ++i;
+        run_start = i;
     }
-    return result.str();
+    if (i > run_start)
+        result.write(escaped.value.data() + static_cast<std::ptrdiff_t>(run_start),
+                     static_cast<std::streamsize>(i - run_start));
+    return result;
 }
 
 std::string bytes_hex(const std::uint8_t* bytes, std::size_t size) {
@@ -407,7 +426,7 @@ void decode_sections(AnalysisReport& report, csh handle) {
     report.status = "partial";
 }
 
-void emit_diagnostics_json(std::ostringstream& output, const std::vector<Diagnostic>& diagnostics) {
+void emit_diagnostics_json(std::ostream& output, const std::vector<Diagnostic>& diagnostics) {
     output << '[';
     for (std::size_t i = 0; i < diagnostics.size(); ++i) {
         const auto& item = diagnostics[i];
@@ -418,7 +437,7 @@ void emit_diagnostics_json(std::ostringstream& output, const std::vector<Diagnos
     output << ']';
 }
 
-void emit_function_records_json(std::ostringstream& output, const std::vector<FunctionRecord>& records) {
+void emit_function_records_json(std::ostream& output, const std::vector<FunctionRecord>& records) {
     output << '[';
     for (std::size_t i = 0; i < records.size(); ++i) {
         const auto& record = records[i];
@@ -450,9 +469,8 @@ void emit_function_records_json(std::ostringstream& output, const std::vector<Fu
     output << ']';
 }
 
-std::string make_json(const AnalysisReport& r) {
+void make_json(std::ostream& o, const AnalysisReport& r) {
     const auto& p = r.pe;
-    std::ostringstream o;
     o << "{\n  \"schema_version\": " << r.schema_version << ",\n  \"status\": \"" << escape_json(r.status)
       << "\",\n  \"run\": {\"start_status\": \"" << escape_json(r.start_status) << "\", \"end_status\": \""
       << escape_json(r.status) << "\", \"exit_code\": " << r.exit_code << "},\n"
@@ -625,9 +643,11 @@ std::string make_json(const AnalysisReport& r) {
       << ",\"candidate_function_count\":" << r.function_recovery.candidate_functions.size()
       << ",\"fragment_count\":" << r.function_recovery.fragments.size()
       << ",\"bounded_range_count\":" << bounded << ",\"ambiguous_range_count\":" << ambiguous
-      << ",\"unresolved_range_count\":" << r.function_recovery.unresolved_ranges.size() << "}},\n  \"semantic_analysis\":"
-      << semantic_analysis_to_json(r.semantic_analysis) << ",\n  \"dataflow_analysis\":"
-      << phase4_analysis_to_json(r.phase4_analysis) << ",\n  \"stages\":[";
+      << ",\"unresolved_range_count\":" << r.function_recovery.unresolved_ranges.size() << "}},\n  \"semantic_analysis\":";
+    semantic_analysis_to_json(o, r.semantic_analysis);
+    o << ",\n  \"dataflow_analysis\":";
+    phase4_analysis_to_json(o, r.phase4_analysis);
+    o << ",\n  \"stages\":[";
     for (std::size_t i=0; i<r.stages.size(); ++i) o << (i?",":"") << "{\"name\":\"" << escape_json(r.stages[i].name) << "\",\"status\":\"" << escape_json(r.stages[i].status) << "\"}";
     o << "],\n  \"diagnostics\":[";
     for (std::size_t i=0; i<r.diagnostics.size(); ++i) { const auto& d=r.diagnostics[i]; o << (i?",":"") << "{\"code\":\"" << escape_json(d.code)
@@ -635,10 +655,64 @@ std::string make_json(const AnalysisReport& r) {
     o << "],\n  \"artifacts\":[";
     for (std::size_t i=0; i<r.artifacts.size(); ++i) o << (i?",":"") << "\"" << escape_json(r.artifacts[i]) << "\"";
     o << "]\n}\n";
-    std::string result = o.str();
-    if (result.size() > kMaxOutputBytes) throw std::runtime_error("analysis report exceeds the configured 64 MiB output limit");
-    return result;
 }
+
+class BoundedStreamBuffer final : public std::streambuf {
+public:
+    explicit BoundedStreamBuffer(std::streambuf* destination) : destination_(destination) {
+        setp(buffer_, buffer_ + sizeof(buffer_));
+    }
+
+    bool limit_exceeded() const noexcept { return limit_exceeded_; }
+    bool output_failed() const noexcept { return output_failed_; }
+
+protected:
+    int_type overflow(int_type character) override {
+        if (!flush_buffer()) return traits_type::eof();
+        if (!traits_type::eq_int_type(character, traits_type::eof())) {
+            *pptr() = traits_type::to_char_type(character);
+            pbump(1);
+        }
+        return traits_type::not_eof(character);
+    }
+
+    std::streamsize xsputn(const char* source, std::streamsize count) override {
+        std::streamsize copied = 0;
+        while (copied < count) {
+            if (pptr() == epptr() && !flush_buffer()) break;
+            const auto available = static_cast<std::streamsize>(epptr() - pptr());
+            const auto chunk = std::min(available, count - copied);
+            std::memcpy(pptr(), source + copied, static_cast<std::size_t>(chunk));
+            pbump(static_cast<int>(chunk));
+            copied += chunk;
+        }
+        return copied;
+    }
+
+    int sync() override {
+        if (!flush_buffer()) return -1;
+        return destination_->pubsync();
+    }
+
+private:
+    bool flush_buffer() {
+        const auto pending = static_cast<std::size_t>(pptr() - pbase());
+        const std::size_t remaining = kMaxOutputBytes - written_;
+        const std::size_t allowed = std::min(pending, remaining);
+        const auto forwarded = destination_->sputn(pbase(), static_cast<std::streamsize>(allowed));
+        written_ += static_cast<std::size_t>(forwarded);
+        if (static_cast<std::size_t>(forwarded) != allowed) output_failed_ = true;
+        if (allowed != pending) limit_exceeded_ = true;
+        setp(buffer_, buffer_ + sizeof(buffer_));
+        return !output_failed_ && !limit_exceeded_;
+    }
+
+    std::streambuf* destination_;
+    char buffer_[8192]{};
+    std::size_t written_ = 0;
+    bool limit_exceeded_ = false;
+    bool output_failed_ = false;
+};
 
 } // namespace
 
@@ -675,14 +749,13 @@ bool Decompiler::load_binary(const std::string& path, AnalysisReport& report) {
     }
     if (!read_input(path, bytes, code, message)) { diagnostic(report, code, "error", message); return false; }
     report.input_sha256 = sha256(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
-    if (!PeImage::parse(std::move(bytes), image_, code, message)) { diagnostic(report, code, "error", message); return false; }
-    report.pe = image_;
-    for (const auto& item : image_.diagnostics) diagnostic(report, item.code, item.severity, item.message);
+    if (!PeImage::parse(std::move(bytes), report.pe, code, message)) { diagnostic(report, code, "error", message); return false; }
+    for (const auto& item : report.pe.diagnostics) diagnostic(report, item.code, item.severity, item.message);
     // LIEF remains an optional cross-check behind the validated adapter; its failure cannot bypass our bounds checks.
-    if (image_.supported_x64_native) {
+    if (report.pe.supported_x64_native) {
         try {
-            lief_binary_ = LIEF::PE::Parser::parse(image_.file_bytes->data(), image_.file_bytes->size());
-            if (!lief_binary_) diagnostic(report, "LIEF_CROSSCHECK_UNAVAILABLE", "warning", "validated PE adapter succeeded but LIEF returned no image");
+            const auto lief_binary = LIEF::PE::Parser::parse(report.pe.file_bytes->data(), report.pe.file_bytes->size());
+            if (!lief_binary) diagnostic(report, "LIEF_CROSSCHECK_UNAVAILABLE", "warning", "validated PE adapter succeeded but LIEF returned no image");
         } catch (const std::exception& ex) {
             diagnostic(report, "LIEF_CROSSCHECK_UNAVAILABLE", "warning", std::string("validated PE adapter succeeded; LIEF cross-check failed: ") + ex.what());
         } catch (...) {
@@ -698,7 +771,7 @@ bool Decompiler::load_binary(const std::string& path, AnalysisReport& report) {
 }
 
 bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path) {
-    if (!image_.file_bytes) {
+    if (!report.pe.file_bytes) {
         diagnostic(report, "ANALYSIS_WITHOUT_INPUT", "error", "analysis requires a validated PE image");
         report.stages.push_back({"analysis", "failed"}); report.status = "failed"; return false;
     }
@@ -707,15 +780,15 @@ bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path) {
         report.stages.push_back({"analysis", "failed"});
         return false;
     }
-    if (!image_.supported_x64_native) {
+    if (!report.pe.supported_x64_native) {
         report.stages.push_back({"analysis", "unsupported"}); report.status = "unsupported";
-        if (image_.clr.present) diagnostic(report, "MANAGED_CLR_UNSUPPORTED", "warning", "CLR/.NET images are identified but are not analyzed as native x86-64");
+        if (report.pe.clr.present) diagnostic(report, "MANAGED_CLR_UNSUPPORTED", "warning", "CLR/.NET images are identified but are not analyzed as native x86-64");
         else diagnostic(report, "ARCHITECTURE_UNSUPPORTED", "warning", "only native PE32+ x86-64 images are analyzed");
         analyze_semantics(report);
         analyze_phase4(report);
         return true;
     }
-    if (image_.clr.present) {
+    if (report.pe.clr.present) {
         report.stages.push_back({"analysis", "unsupported"}); report.status = "unsupported";
         diagnostic(report, "MANAGED_CLR_UNSUPPORTED", "warning", "CLR/.NET images are identified but are not analyzed as native x86-64");
         analyze_semantics(report);
@@ -818,6 +891,21 @@ std::string Decompiler::emit_annotated_disassembly(const AnalysisReport& r) cons
     return result;
 }
 
-std::string report_to_json(const AnalysisReport& report) { return make_json(report); }
+void write_report_json(std::ostream& output, const AnalysisReport& report) {
+    BoundedStreamBuffer buffer(output.rdbuf());
+    std::ostream bounded_output(&buffer);
+    bounded_output.imbue(output.getloc());
+    make_json(bounded_output, report);
+    bounded_output.flush();
+    if (buffer.limit_exceeded())
+        throw std::runtime_error("analysis report exceeds the configured 64 MiB output limit");
+    if (buffer.output_failed() || !bounded_output)
+        throw std::runtime_error("failed while streaming the analysis report");
+}
 
+std::string report_to_json(const AnalysisReport& report) {
+    std::ostringstream output;
+    write_report_json(output, report);
+    return output.str();
+}
 } // namespace nexusrev

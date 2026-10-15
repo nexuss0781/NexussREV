@@ -25,34 +25,51 @@ constexpr std::size_t kMaxPhase4Instructions = 20000U;
 constexpr std::size_t kMaxPhase4Variables = 8192U;
 constexpr std::size_t kMaxPseudocodeBytes = 16U * 1024U * 1024U;
 
-std::string json_escape(const std::string& value) {
-    std::ostringstream out;
+struct JsonEscapedString {
+    const std::string& value;
+};
+
+JsonEscapedString json_escape(const std::string& value) { return {value}; }
+
+std::ostream& operator<<(std::ostream& out, JsonEscapedString escaped) {
     constexpr char hex[] = "0123456789abcdef";
-    for (const unsigned char c : value) {
+    std::size_t run_start = 0U;
+    for (std::size_t i = 0U; i < escaped.value.size(); ++i) {
+        const auto c = static_cast<unsigned char>(escaped.value[i]);
+        const char* replacement = nullptr;
+        std::size_t replacement_size = 0U;
         switch (c) {
-        case '"': out << "\\\""; break;
-        case '\\': out << "\\\\"; break;
-        case '\b': out << "\\b"; break;
-        case '\f': out << "\\f"; break;
-        case '\n': out << "\\n"; break;
-        case '\r': out << "\\r"; break;
-        case '\t': out << "\\t"; break;
-        default:
-            if (c < 0x20U) out << "\\u00" << hex[(c >> 4U) & 15U] << hex[c & 15U];
-            else out << static_cast<char>(c);
+        case '"': replacement = "\\\""; replacement_size = 2U; break;
+        case '\\': replacement = "\\\\"; replacement_size = 2U; break;
+        case '\b': replacement = "\\b"; replacement_size = 2U; break;
+        case '\f': replacement = "\\f"; replacement_size = 2U; break;
+        case '\n': replacement = "\\n"; replacement_size = 2U; break;
+        case '\r': replacement = "\\r"; replacement_size = 2U; break;
+        case '\t': replacement = "\\t"; replacement_size = 2U; break;
+        default: break;
         }
+        if (replacement == nullptr && c >= 0x20U) continue;
+        if (i > run_start) out.write(escaped.value.data() + run_start, static_cast<std::streamsize>(i - run_start));
+        if (replacement != nullptr) out.write(replacement, static_cast<std::streamsize>(replacement_size));
+        else {
+            char encoded[] = {'\\', 'u', '0', '0', hex[(c >> 4U) & 15U], hex[c & 15U]};
+            out.write(encoded, static_cast<std::streamsize>(sizeof(encoded)));
+        }
+        run_start = i + 1U;
     }
-    return out.str();
+    if (run_start < escaped.value.size())
+        out.write(escaped.value.data() + run_start, static_cast<std::streamsize>(escaped.value.size() - run_start));
+    return out;
 }
 
-void emit_strings(std::ostringstream& out, const std::vector<std::string>& values) {
+void emit_strings(std::ostream& out, const std::vector<std::string>& values) {
     out << '[';
     for (std::size_t i = 0; i < values.size(); ++i)
         out << (i ? "," : "") << '"' << json_escape(values[i]) << '"';
     out << ']';
 }
 
-void emit_evidence(std::ostringstream& out, const std::vector<Phase4Evidence>& evidence) {
+void emit_evidence(std::ostream& out, const std::vector<Phase4Evidence>& evidence) {
     out << '[';
     for (std::size_t i = 0; i < evidence.size(); ++i) {
         const auto& item = evidence[i];
@@ -63,7 +80,7 @@ void emit_evidence(std::ostringstream& out, const std::vector<Phase4Evidence>& e
     out << ']';
 }
 
-void emit_optional_i64(std::ostringstream& out, const std::optional<std::int64_t>& value) {
+void emit_optional_i64(std::ostream& out, const std::optional<std::int64_t>& value) {
     if (value) out << *value; else out << "null";
 }
 
@@ -1285,8 +1302,7 @@ std::string emit_pseudocode(const AnalysisReport& report) {
     return result;
 }
 
-std::string phase4_analysis_to_json(const Phase4AnalysisRecord& r) {
-    std::ostringstream out;
+void phase4_analysis_to_json(std::ostream& out, const Phase4AnalysisRecord& r) {
     out << "{\"status\":\"" << json_escape(r.status) << "\",\"backend\":\"" << json_escape(r.backend)
         << "\",\"abi\":\"" << json_escape(r.abi) << "\",\"stack_frames\":[";
     for (std::size_t i = 0; i < r.stack_frames.size(); ++i) {
@@ -1394,7 +1410,12 @@ std::string phase4_analysis_to_json(const Phase4AnalysisRecord& r) {
     out << "],\"limitations\":";
     emit_strings(out, r.limitations);
     out << '}';
-    return out.str();
+}
+
+std::string phase4_analysis_to_json(const Phase4AnalysisRecord& record) {
+    std::ostringstream output;
+    phase4_analysis_to_json(output, record);
+    return output.str();
 }
 
 } // namespace nexusrev

@@ -12,6 +12,7 @@
 #include <limits>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -447,6 +448,43 @@ bool write_temporary(const std::filesystem::path& path, const std::string& conte
     return true;
 }
 
+bool write_temporary_report(const std::filesystem::path& path,
+                            const nexusrev::AnalysisReport& report,
+                            std::string& error) {
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        error = "cannot create temporary output file: " + path.string();
+        return false;
+    }
+    try {
+        nexusrev::write_report_json(output, report);
+    } catch (const std::runtime_error& exception) {
+        output.close();
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+        if (std::string(exception.what()) ==
+            "analysis report exceeds the configured 64 MiB output limit")
+            throw;
+        error = "failed while writing temporary report file: " + std::string(exception.what());
+        return false;
+    } catch (const std::exception& exception) {
+        output.close();
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+        error = "failed while writing temporary report file: " + std::string(exception.what());
+        return false;
+    }
+    output.flush();
+    output.close();
+    if (!output || !sync_staged_file(path, error)) {
+        std::error_code ignored;
+        std::filesystem::remove(path, ignored);
+        if (error.empty()) error = "failed while writing temporary report file: " + path.string();
+        return false;
+    }
+    return true;
+}
+
 bool replace_file(const std::filesystem::path& source,
                   const std::filesystem::path& destination, std::string& error) {
 #ifdef _WIN32
@@ -475,7 +513,7 @@ bool replace_file(const std::filesystem::path& source,
 }
 
 bool write_artifacts(const CliOptions& options, const std::string& disassembly,
-                     const std::string& report_json, std::string& error) {
+                     const nexusrev::AnalysisReport& report, std::string& error) {
     const std::filesystem::path output_path(options.output_path);
     const std::filesystem::path report_path(options.report_path);
     if (!destination_is_replaceable(output_path, error) ||
@@ -494,10 +532,18 @@ bool write_artifacts(const CliOptions& options, const std::string& disassembly,
         std::filesystem::remove_all(output_stage.directory, ignored);
         std::filesystem::remove_all(report_stage.directory, ignored);
     };
-    if (!write_temporary(output_stage.temporary, disassembly, error) ||
-        !write_temporary(report_stage.temporary, report_json, error)) {
+    if (!write_temporary(output_stage.temporary, disassembly, error)) {
         cleanup();
         return false;
+    }
+    try {
+        if (!write_temporary_report(report_stage.temporary, report, error)) {
+            cleanup();
+            return false;
+        }
+    } catch (...) {
+        cleanup();
+        throw;
     }
     if (nexusrev::analysis_stop_reason() != nexusrev::StopReason::none) {
         error = "analysis was stopped before output publication";
@@ -646,7 +692,6 @@ int main(int argc, char** argv) {
         report.exit_code = 0;
         const std::string output_text = options.format == "pseudocode" ?
             nexusrev::emit_pseudocode(report) : decompiler.emit_annotated_disassembly(report);
-        const std::string report_json = nexusrev::report_to_json(report);
         const auto after_serialization = nexusrev::analysis_stop_reason();
         if (after_serialization != nexusrev::StopReason::none) {
             report_stop(after_serialization, options.log_format);
@@ -654,7 +699,7 @@ int main(int argc, char** argv) {
         }
 
         std::string write_error;
-        if (!write_artifacts(options, output_text, report_json, write_error)) {
+        if (!write_artifacts(options, output_text, report, write_error)) {
             const auto reason = nexusrev::analysis_stop_reason();
             if (reason != nexusrev::StopReason::none) {
                 report_stop(reason, options.log_format);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nexusrev.hpp"
+#include <iosfwd>
 #include <string>
 
 namespace nexusrev {
@@ -14,6 +15,7 @@ void analyze_phase4(AnalysisReport& report);
 std::string emit_pseudocode(const AnalysisReport& report);
 
 // Serialize Phase 4 records as one JSON object.
+void phase4_analysis_to_json(std::ostream& output, const Phase4AnalysisRecord& record);
 std::string phase4_analysis_to_json(const Phase4AnalysisRecord& record);
 
 } // namespace nexusrev

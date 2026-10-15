@@ -5,14 +5,10 @@
 #include <array>
 #include <cstdint>
 #include <chrono>
-#include <memory>
+#include <iosfwd>
 #include <optional>
 #include <string>
 #include <vector>
-
-namespace LIEF {
-class Binary;
-}
 
 namespace nexusrev {
 
@@ -418,11 +414,10 @@ public:
     bool analyze(AnalysisReport& report, const std::string& pdb_path = {});
     std::string emit_annotated_disassembly(const AnalysisReport& report) const;
 private:
-    PeImage image_;
-    std::unique_ptr<LIEF::Binary> lief_binary_;
     csh capstone_handle_ = 0;
 };
 
+void write_report_json(std::ostream& output, const AnalysisReport& report);
 std::string report_to_json(const AnalysisReport& report);
 
 } // namespace nexusrev

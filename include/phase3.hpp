@@ -2,6 +2,7 @@
 
 #include "nexusrev.hpp"
 
+#include <iosfwd>
 #include <string>
 
 namespace nexusrev {
@@ -15,6 +16,7 @@ void analyze_semantics(AnalysisReport& report);
 void compare_ghidra_reference(AnalysisReport& report, const std::string& path);
 
 // Serialize the Phase 3 report member as one JSON object.
+void semantic_analysis_to_json(std::ostream& output, const SemanticAnalysisRecord& record);
 std::string semantic_analysis_to_json(const SemanticAnalysisRecord& record);
 
 } // namespace nexusrev

@@ -190,7 +190,23 @@ A phase is complete only when its exit gate is satisfied in CI and its artifacts
 
 **Static-engine semantic milestone (2026-10-15):** the bounded Antigravity slice contains 113 `MOVQ` instructions; all 113 now have exact legacy SSE2 semantics, reducing unsupported instructions from 395 to 282 without changing decode coverage, the 54 unresolved flow issues, or candidate/known-function counts. The updated report validates against schema v6 and remains below the 64 MiB limit. The installer and extracted engine remain unexecuted; this does not claim complete decompilation. See the Phase 10 entry in [`docs/antigravity-engine-static-analysis.md`](docs/antigravity-engine-static-analysis.md).
 
-**Next Phase 7 gates:** (1) compact or stream report serialization before raising limits; (2) replace first-N linear decoding with deterministic, per-section/function worklists seeded by validated ranges while preserving decode accounting and explicit gaps; (3) continue measured SIMD semantics beyond the bounded MOVQ slice with focused regression/reference tests; and (4) keep unresolved control flow, absent symbols, and partial coverage visible.
+**Next Phase 7 gates:** (1) replace first-N linear decoding with deterministic, per-section/function worklists seeded by validated ranges while preserving decode accounting and explicit gaps; (2) continue measured SIMD semantics beyond the bounded MOVQ slice with focused regression/reference tests; and (3) keep unresolved control flow, absent symbols, and partial coverage visible. Streaming serialization is implemented under Phase 11; any future limit increase must retain its output bound and exact-parity regression.
+
+### Phase 11 — Resource optimization with exact-output parity
+
+**Upgrade areas**
+
+- Remove duplicate ownership of the parsed PE model and release optional parser cross-check state immediately after parsing.
+- Stream report JSON through a bounded writer rather than retaining a full report string and nested serializer strings; write ordinary string spans directly while preserving JSON escaping, output limits, and atomic staged publication.
+- Reduce transient allocations and peak RAM without trimming report detail, instruction/semantic records, coverage, or validation quality.
+
+**Gate 11**
+
+- On the hash-pinned Antigravity sample, preserve the disassembly and JSON report byte-for-byte for identical options/paths; continue to pass the active schema and all golden/regression gates.
+- Demonstrate a measurable peak-RSS reduction under the existing Release + ASan/UBSan build; maintain the 64 MiB report ceiling, cancellation/error handling, and staged-file publication behavior.
+- Leave `README.md` byte-for-byte unchanged and never execute the installer or extracted engine.
+
+**Phase 11 status (2026-10-15): IMPLEMENTED; all local gates pass.** PE metadata now has one owner; the LIEF cross-check object is local to parsing; JSON serialization streams through a fixed-size buffer bounded at 64 MiB with allocation-free escaping of ordinary spans. On the same Antigravity input (`ecc463b48ba0a6902fe0975d6ef357d504038a1b818387f0868348d92fcccfbe`), same output paths, and the Release build with ASan/UBSan, peak RSS changed from 939,400 KiB to 664,536 KiB (−274,864 KiB; −29.3%), while elapsed time changed from 9.762 s to 9.697 s. Both report and disassembly SHA-256 hashes match their pre-change artifacts exactly; schema v6 validates, all six CTest gates pass, and the fixed-seed 2,000-run ASan/UBSan fuzz smoke has no finding. The output remains 20,000 decoded instructions with 19,718 modeled semantics, 282 unsupported instructions, and 54 unresolved-flow issues; coverage remains partial. The README hash is unchanged. Hosted CI remains pending.
 
 ## 5. Library and tool selection
 
