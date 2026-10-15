@@ -490,6 +490,96 @@ bool legacy_simd_semantics_tests() {
     return true;
 }
 
+bool legacy_pxor_semantics_tests() {
+    nexusrev::AnalysisReport report;
+    configure_pe(report);
+    const auto append = [&report](std::uint32_t rva, const std::string& bytes,
+                                  std::vector<nexusrev::X86OperandRecord> operands,
+                                  bool legacy_prefix = true, bool valid_opcode = true) {
+        auto insn = synthetic_instruction(rva, "pxor", bytes);
+        insn.opcodes[0] = 0x0fU;
+        insn.opcodes[1] = valid_opcode ? 0xefU : 0xeeU;
+        if (legacy_prefix) insn.prefixes[2] = 0x66U;
+        insn.detail_operands = std::move(operands);
+        insn.registers_read.clear();
+        insn.registers_written.clear();
+        report.instructions.push_back(std::move(insn));
+    };
+    auto xmm0 = reg_operand("xmm0", 0U); xmm0.size = 16U;
+    auto xmm1 = reg_operand("xmm1", 0U); xmm1.size = 16U;
+    append(0x1000U, "66 0f ef c1", {xmm0, xmm1});
+    auto xmm2 = reg_operand("xmm2", 0U); xmm2.size = 16U;
+    append(0x1001U, "66 0f ef 10", {xmm2, memory_operand("rax", 0, 16U, 0U)});
+
+    auto ymm0 = reg_operand("ymm0", 3U); ymm0.size = 32U;
+    auto ymm1 = reg_operand("ymm1", 1U); ymm1.size = 32U;
+    append(0x1002U, "66 0f ef c1", {ymm0, ymm1});
+    auto bad_encoding_dst = reg_operand("xmm3", 3U); bad_encoding_dst.size = 16U;
+    auto bad_encoding_src = reg_operand("xmm4", 1U); bad_encoding_src.size = 16U;
+    append(0x1003U, "0f ef dc", {bad_encoding_dst, bad_encoding_src}, false);
+    auto mm0 = reg_operand("mm0", 3U); mm0.size = 8U;
+    auto mm1 = reg_operand("mm1", 1U); mm1.size = 8U;
+    append(0x1004U, "66 0f ef c1", {mm0, mm1});
+    auto bad_memory_dst = memory_operand("rax", 0, 16U, 2U);
+    auto xmm5 = reg_operand("xmm5", 1U); xmm5.size = 16U;
+    append(0x1005U, "66 0f ef 28", {bad_memory_dst, xmm5});
+    auto vpxor = synthetic_instruction(0x1006U, "vpxor", "c5 f9 ef c1");
+    auto xmm6 = reg_operand("xmm6", 3U); xmm6.size = 16U;
+    auto xmm7 = reg_operand("xmm7", 1U); xmm7.size = 16U;
+    auto xmm8 = reg_operand("xmm8", 1U); xmm8.size = 16U;
+    vpxor.detail_operands = {xmm6, xmm7, xmm8};
+    report.instructions.push_back(std::move(vpxor));
+    auto bad_opcode_dst = reg_operand("xmm9", 3U); bad_opcode_dst.size = 16U;
+    auto bad_opcode_src = reg_operand("xmm10", 1U); bad_opcode_src.size = 16U;
+    append(0x1007U, "66 0f ee cf", {bad_opcode_dst, bad_opcode_src}, true, false);
+
+    nexusrev::analyze_semantics(report);
+    const auto find_sem = [&report](std::uint32_t address) -> const nexusrev::SemanticInstructionRecord* {
+        for (const auto& sem : report.semantic_analysis.instructions)
+            if (sem.rva == address) return &sem;
+        return nullptr;
+    };
+    const auto* register_xor = find_sem(0x1000U);
+    const auto* memory_xor = find_sem(0x1001U);
+    const auto* wide_xor = find_sem(0x1002U);
+    const auto* bad_encoding = find_sem(0x1003U);
+    const auto* mmx_xor = find_sem(0x1004U);
+    const auto* memory_destination = find_sem(0x1005U);
+    const auto* vex_xor = find_sem(0x1006U);
+    const auto* bad_opcode = find_sem(0x1007U);
+    if (register_xor == nullptr || register_xor->status != "modeled" ||
+        register_xor->operation != "vector_xor_128_preserve_upper_lanes" ||
+        register_xor->registers_read != std::vector<std::string>({"xmm0", "xmm1"}) ||
+        register_xor->registers_written != std::vector<std::string>({"xmm0"}) ||
+        !register_xor->flags_read.empty() || !register_xor->flags_written.empty() ||
+        !register_xor->flags_undefined.empty() || register_xor->flags_preserved.size() != 6U ||
+        !has(register_xor->flags_preserved, "CF") || !has(register_xor->flags_preserved, "PF") ||
+        !has(register_xor->flags_preserved, "AF") || !has(register_xor->flags_preserved, "ZF") ||
+        !has(register_xor->flags_preserved, "SF") || !has(register_xor->flags_preserved, "OF") ||
+        memory_xor == nullptr || memory_xor->status != "modeled" ||
+        !memory_xor->memory_read || memory_xor->memory_written ||
+        !has(memory_xor->registers_read, "xmm2") || !has(memory_xor->registers_read, "rax") ||
+        memory_xor->registers_written != std::vector<std::string>({"xmm2"}) ||
+        wide_xor == nullptr || wide_xor->status != "unsupported" ||
+        wide_xor->unresolved_reason != "pxor_operand_width_not_128_bits" ||
+        bad_encoding == nullptr || bad_encoding->status != "unsupported" ||
+        bad_encoding->unresolved_reason != "pxor_legacy_sse2_encoding_not_supported" ||
+        mmx_xor == nullptr || mmx_xor->status != "unsupported" ||
+        mmx_xor->unresolved_reason != "pxor_operand_width_not_128_bits" ||
+        memory_destination == nullptr || memory_destination->status != "unsupported" ||
+        memory_destination->unresolved_reason != "pxor_operand_form_not_supported" ||
+        vex_xor == nullptr || vex_xor->status != "unsupported" ||
+        vex_xor->unresolved_reason != "instruction_semantics_not_implemented" ||
+        bad_opcode == nullptr || bad_opcode->status != "unsupported" ||
+        bad_opcode->unresolved_reason != "pxor_legacy_sse2_encoding_not_supported" ||
+        report.semantic_analysis.modeled_instruction_count != 2U ||
+        report.semantic_analysis.unsupported_instruction_count != 6U) {
+        std::cerr << "legacy PXOR lane, register, memory, flag, or unsupported-form semantics are inaccurate\n";
+        return false;
+    }
+    return true;
+}
+
 bool legacy_movq_semantics_tests() {
     nexusrev::AnalysisReport report;
     configure_pe(report);
@@ -1062,6 +1152,7 @@ int main() {
     }
     if (!pe_parser_tests() || !semantic_operation_tests() || !shift_semantics_tests() ||
         !trap_semantics_tests() || !bit_operation_tests() || !legacy_simd_semantics_tests() ||
+        !legacy_pxor_semantics_tests() ||
         !legacy_movq_semantics_tests() ||
         !cfg_and_reference_tests() || !phase9_switch_flow_tests() ||
         !phase4_stack_and_signature_tests() || !phase4_import_dataflow_tests() ||

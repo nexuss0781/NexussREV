@@ -185,6 +185,31 @@ bool prepare_legacy_simd_operands(const std::string& mnemonic, const Instruction
     return true;
 }
 
+bool prepare_legacy_pxor_operands(const InstructionRecord& insn, std::string& reason) {
+    if (insn.detail_operands.size() != 2U) {
+        reason = "pxor_operand_count_not_supported";
+        return false;
+    }
+    if (insn.opcodes[0] != 0x0fU || insn.opcodes[1] != 0xefU ||
+        !has_prefix(insn, 0x66U) || has_prefix(insn, 0xf2U) || has_prefix(insn, 0xf3U)) {
+        reason = "pxor_legacy_sse2_encoding_not_supported";
+        return false;
+    }
+    const auto& destination = insn.detail_operands[0];
+    const auto& source = insn.detail_operands[1];
+    if (destination.size != 16U || source.size != 16U) {
+        reason = "pxor_operand_width_not_128_bits";
+        return false;
+    }
+    if (destination.type != "register" || !is_xmm_register(destination) ||
+        (!is_xmm_register(source) && source.type != "memory") ||
+        (source.type == "memory" && (source.avx_broadcast != 0U || source.avx_zero_opmask))) {
+        reason = "pxor_operand_form_not_supported";
+        return false;
+    }
+    return true;
+}
+
 bool prepare_legacy_movq_operands(const InstructionRecord& insn, std::string& operation,
                                  std::string& reason) {
     if (insn.detail_operands.size() != 2U) {
@@ -547,12 +572,14 @@ SemanticInstructionRecord lift_one(const PeImage& pe, const InstructionRecord& i
     const bool bit_test = is_bit_test_instruction(m);
     const bool bit_scan = is_bit_scan_instruction(m);
     const bool legacy_simd = is_legacy_simd_instruction(m);
+    const bool legacy_pxor = m == "pxor";
     const bool legacy_movq = m == "movq";
     std::string movq_operation;
     std::optional<unsigned int> shift_count;
     if (shift && !prepare_shift_operands(insn, shift_count, sem.unresolved_reason)) return sem;
     if ((bit_test || bit_scan) && !prepare_bit_operands(m, insn, sem.unresolved_reason)) return sem;
     if (legacy_simd && !prepare_legacy_simd_operands(m, insn, sem.unresolved_reason)) return sem;
+    if (legacy_pxor && !prepare_legacy_pxor_operands(insn, sem.unresolved_reason)) return sem;
     if (legacy_movq && !prepare_legacy_movq_operands(insn, movq_operation, sem.unresolved_reason)) return sem;
 
     if ((m == "leave" && has_operand_size_override(insn)) ||
@@ -578,6 +605,7 @@ SemanticInstructionRecord lift_one(const PeImage& pe, const InstructionRecord& i
     else if (m == "xchg") sem.operation = "exchange";
     else if (m == "movups") sem.operation = "vector_move_128";
     else if (m == "xorps") sem.operation = "vector_xor_128";
+    else if (legacy_pxor) sem.operation = "vector_xor_128_preserve_upper_lanes";
     else if (legacy_movq) sem.operation = movq_operation;
     else if (shift) sem.operation = m == "sal" ? "shl" : m;
     else if (trap) sem.operation = "trap";
@@ -636,6 +664,24 @@ SemanticInstructionRecord lift_one(const PeImage& pe, const InstructionRecord& i
                 add_unique(sem.registers_read, operand.reg);
             }
         }
+    }
+    if (legacy_pxor) {
+        const auto& source = sem.operands[1];
+        sem.registers_read.clear();
+        sem.registers_written.clear();
+        for (std::size_t index = 0; index < sem.operands.size(); ++index) {
+            const auto& operand = sem.operands[index];
+            if (operand.type == "register") {
+                add_unique(sem.registers_read, operand.reg);
+                if (index == 0U) add_unique(sem.registers_written, operand.reg);
+            } else if (operand.type == "memory") {
+                add_unique(sem.registers_read, operand.base);
+                add_unique(sem.registers_read, operand.index);
+                add_unique(sem.registers_read, operand.segment);
+            }
+        }
+        sem.memory_read = source.type == "memory";
+        sem.memory_written = false;
     }
     if (sem.operation == "add" || sem.operation == "sub" || sem.operation == "adc" ||
         sem.operation == "sbb" || sem.operation == "cmp" || sem.operation == "neg") {
