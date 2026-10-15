@@ -145,6 +145,22 @@ struct FunctionView {
     std::vector<const InstructionRecord*> instructions;
 };
 
+constexpr std::array<const char*, 4> kAbiArgumentRegisters = {"rcx", "rdx", "r8", "r9"};
+
+enum class ReachingDefinitionKind { bottom, unknown, entry_argument, definition, conflict };
+
+struct ReachingDefinition {
+    ReachingDefinitionKind kind = ReachingDefinitionKind::bottom;
+    const InstructionRecord* instruction = nullptr;
+};
+
+using RegisterReachingState = std::array<ReachingDefinition, 4>;
+
+struct CfgReachingAnalysis {
+    std::map<std::uint32_t, RegisterReachingState> at_calls;
+    bool limit_hit = false;
+};
+
 struct Prototype {
     const char* name;
     const char* result;
@@ -471,39 +487,45 @@ FunctionSignatureRecord infer_signature(const FunctionView& view, const Analysis
 }
 
 std::vector<CallArgumentFlowRecord> call_arguments_for(
-    const FunctionView& view, const InstructionRecord& call, std::size_t count,
-    const std::map<std::string, const InstructionRecord*>& last_definitions,
-    const std::set<std::string>& entry_arguments,
+    std::uint32_t caller_start_rva, const InstructionRecord& call, std::size_t count,
+    const RegisterReachingState* reaching_state,
     std::optional<std::uint32_t> target, const std::string& callee) {
-    static const std::array<const char*, 4> abi_registers = {"rcx", "rdx", "r8", "r9"};
     std::vector<CallArgumentFlowRecord> result;
-    const auto limit = std::min(count, abi_registers.size());
+    const auto limit = std::min(count, kAbiArgumentRegisters.size());
     for (std::size_t index = 0; index < limit; ++index) {
-        const std::string reg = abi_registers[index];
+        const std::string reg = kAbiArgumentRegisters[index];
         CallArgumentFlowRecord flow;
-        flow.caller_start_rva = view.semantic->start_rva;
+        flow.caller_start_rva = caller_start_rva;
         flow.call_rva = call.rva;
         flow.target_rva = target;
         flow.callee = callee;
         flow.parameter_index = static_cast<std::uint32_t>(index);
         flow.argument_register = reg;
-        const auto definition = last_definitions.find(reg);
-        if (definition != last_definitions.end()) {
-            flow.source_kind = "linear_register_definition";
-            flow.source_rva = definition->second->rva;
-            flow.source_description = source_register(*definition->second, reg) + "; path-sensitive merge is not performed";
-            flow.confidence = 0.42;
-            flow.evidence.push_back({"linear_register_reaching_definition", flow.source_description, 0.42});
-        } else if (entry_arguments.find(reg) != entry_arguments.end()) {
+        const ReachingDefinition reaching = reaching_state == nullptr ? ReachingDefinition{} : (*reaching_state)[index];
+        if (reaching.kind == ReachingDefinitionKind::definition && reaching.instruction != nullptr) {
+            flow.source_kind = "cfg_register_definition";
+            flow.source_rva = reaching.instruction->rva;
+            flow.source_description = source_register(*reaching.instruction, reg) + "; this same reaching definition is present on every modeled incoming path";
+            flow.confidence = 0.60;
+            flow.evidence.push_back({"cfg_unique_reaching_definition", flow.source_description, flow.confidence});
+        } else if (reaching.kind == ReachingDefinitionKind::entry_argument) {
             flow.source_kind = "caller_entry_parameter";
-            flow.source_description = "register remains sourced from this function's entry value; path-sensitive merge is not performed";
+            flow.source_description = "register remains sourced from this function's entry value on every modeled incoming path";
             flow.confidence = 0.45;
             flow.evidence.push_back({"caller_signature_register", flow.source_description, 0.45});
+        } else if (reaching.kind == ReachingDefinitionKind::conflict) {
+            flow.source_kind = "unknown";
+            flow.source_description = "reachable CFG paths disagree on the reaching value for " + reg + "; the merge is intentionally left unknown";
+            flow.confidence = 0.0;
+            flow.evidence.push_back({"cfg_reaching_definition_merge_conflict", flow.source_description, 0.0});
         } else {
             flow.source_kind = "unknown";
-            flow.source_description = "no local definition was observed for this argument register";
+            flow.source_description = reaching_state == nullptr ?
+                "bounded CFG reaching-definition analysis was unavailable for this call" :
+                "no unique reaching value was recovered for this argument register";
             flow.confidence = 0.0;
-            flow.evidence.push_back({"argument_value_unknown", flow.source_description, 0.0});
+            flow.evidence.push_back({reaching_state == nullptr ? "cfg_reaching_definition_unavailable" : "argument_value_unknown",
+                                     flow.source_description, 0.0});
         }
         result.push_back(std::move(flow));
     }
@@ -521,6 +543,139 @@ std::map<std::uint32_t, std::set<std::uint32_t>> block_adjacency(
         adjacency[edge.from_block].insert(*edge.to_block);
     }
     return adjacency;
+}
+
+ReachingDefinition join_reaching_definitions(const ReachingDefinition& lhs,
+                                             const ReachingDefinition& rhs) {
+    if (lhs.kind == ReachingDefinitionKind::bottom) return rhs;
+    if (rhs.kind == ReachingDefinitionKind::bottom) return lhs;
+    if (lhs.kind == rhs.kind &&
+        (lhs.kind != ReachingDefinitionKind::definition || lhs.instruction == rhs.instruction)) return lhs;
+    return {ReachingDefinitionKind::conflict, nullptr};
+}
+
+bool same_reaching_state(const RegisterReachingState& lhs, const RegisterReachingState& rhs) {
+    for (std::size_t index = 0U; index < lhs.size(); ++index)
+        if (lhs[index].kind != rhs[index].kind || lhs[index].instruction != rhs[index].instruction) return false;
+    return true;
+}
+
+CfgReachingAnalysis analyze_register_reaching(
+    const FunctionView& view, const SemanticAnalysisRecord& semantic,
+    const std::set<std::string>& entry_arguments) {
+    CfgReachingAnalysis result;
+    std::map<std::uint32_t, const SemanticBasicBlock*> blocks;
+    for (const auto& block : semantic.basic_blocks) {
+        if (block.function_start_rva != view.semantic->start_rva) continue;
+        if (blocks.size() >= kMaxPhase4Instructions) {
+            result.limit_hit = true;
+            return result;
+        }
+        blocks.emplace(block.id, &block);
+    }
+    const auto entry = std::find_if(blocks.begin(), blocks.end(), [&view](const auto& item) {
+        return item.second->start_rva == view.semantic->start_rva;
+    });
+    if (entry == blocks.end()) return result;
+
+    std::map<std::uint32_t, std::set<std::uint32_t>> successors;
+    std::map<std::uint32_t, std::set<std::uint32_t>> predecessors;
+    for (const auto& item : blocks) {
+        successors[item.first];
+        predecessors[item.first];
+    }
+    for (const auto& edge : semantic.cfg_edges) {
+        if (edge.function_start_rva != view.semantic->start_rva || !edge.to_block ||
+            !blocks.count(edge.from_block) || !blocks.count(*edge.to_block) ||
+            edge.kind == "call" || edge.kind == "indirect_call") continue;
+        successors[edge.from_block].insert(*edge.to_block);
+        predecessors[*edge.to_block].insert(edge.from_block);
+    }
+
+    std::set<std::uint32_t> reachable;
+    std::queue<std::uint32_t> pending;
+    pending.push(entry->first);
+    reachable.insert(entry->first);
+    while (!pending.empty()) {
+        const auto current = pending.front();
+        pending.pop();
+        for (const auto next : successors[current])
+            if (reachable.insert(next).second) pending.push(next);
+    }
+
+    std::map<std::uint32_t, const InstructionRecord*> instructions;
+    for (const auto* instruction : view.instructions) instructions.emplace(instruction->rva, instruction);
+    std::map<std::uint32_t, RegisterReachingState> incoming;
+    std::map<std::uint32_t, RegisterReachingState> outgoing;
+    for (const auto block_id : reachable) {
+        incoming.emplace(block_id, RegisterReachingState{});
+        outgoing.emplace(block_id, RegisterReachingState{});
+    }
+    RegisterReachingState entry_state;
+    for (std::size_t index = 0U; index < entry_state.size(); ++index) {
+        entry_state[index].kind = entry_arguments.count(kAbiArgumentRegisters[index]) ?
+            ReachingDefinitionKind::entry_argument : ReachingDefinitionKind::unknown;
+    }
+
+    const auto apply_writes = [](RegisterReachingState& state, const InstructionRecord& instruction) {
+        const auto mnemonic = lower(instruction.mnemonic);
+        if (mnemonic == "call" || mnemonic == "callq") {
+            for (auto& value : state) value = {ReachingDefinitionKind::unknown, nullptr};
+            return;
+        }
+        for (const auto& written : instruction.registers_written) {
+            const auto canonical = canonical_register(written);
+            for (std::size_t index = 0U; index < kAbiArgumentRegisters.size(); ++index)
+                if (canonical == kAbiArgumentRegisters[index])
+                    state[index] = {ReachingDefinitionKind::definition, &instruction};
+        }
+    };
+
+    std::set<std::uint32_t> queued;
+    pending.push(entry->first);
+    queued.insert(entry->first);
+    std::size_t work_items = 0U;
+    constexpr std::size_t kMaxCfgDataflowWorkItems = kMaxPhase4Instructions * 8U;
+    while (!pending.empty()) {
+        if (++work_items > kMaxCfgDataflowWorkItems) {
+            result.limit_hit = true;
+            result.at_calls.clear();
+            return result;
+        }
+        const auto block_id = pending.front();
+        pending.pop();
+        queued.erase(block_id);
+        RegisterReachingState state;
+        if (block_id == entry->first) state = entry_state;
+        for (const auto predecessor : predecessors[block_id]) {
+            if (!reachable.count(predecessor)) continue;
+            const auto& predecessor_state = outgoing[predecessor];
+            for (std::size_t index = 0U; index < state.size(); ++index)
+                state[index] = join_reaching_definitions(state[index], predecessor_state[index]);
+        }
+        incoming[block_id] = state;
+        for (const auto instruction_rva : blocks[block_id]->instruction_rvas) {
+            const auto instruction = instructions.find(instruction_rva);
+            if (instruction != instructions.end()) apply_writes(state, *instruction->second);
+        }
+        if (!same_reaching_state(outgoing[block_id], state)) {
+            outgoing[block_id] = state;
+            for (const auto successor : successors[block_id])
+                if (queued.insert(successor).second) pending.push(successor);
+        }
+    }
+
+    for (const auto block_id : reachable) {
+        auto state = incoming[block_id];
+        for (const auto instruction_rva : blocks[block_id]->instruction_rvas) {
+            const auto instruction = instructions.find(instruction_rva);
+            if (instruction == instructions.end()) continue;
+            const auto mnemonic = lower(instruction->second->mnemonic);
+            if (mnemonic == "call" || mnemonic == "callq") result.at_calls[instruction_rva] = state;
+            apply_writes(state, *instruction->second);
+        }
+    }
+    return result;
 }
 
 std::map<std::uint32_t, int> distances_from(
@@ -1090,7 +1245,15 @@ void analyze_phase4(AnalysisReport& report) {
 
     std::map<std::pair<std::uint32_t, std::uint32_t>, ImportedCallRecord> imported_calls;
     for (const auto& view : views) {
-        std::map<std::string, const InstructionRecord*> last_definitions;
+        const auto entry_args = entry_arguments_by_start.find(view.semantic->start_rva);
+        const std::set<std::string> empty_args;
+        const auto& function_entry_args = entry_args == entry_arguments_by_start.end() ? empty_args : entry_args->second;
+        const auto reaching = analyze_register_reaching(view, report.semantic_analysis, function_entry_args);
+        if (reaching.limit_hit) {
+            const std::string limitation = "bounded CFG register reaching-definition analysis reached its per-function work limit; call-argument sources remain unknown";
+            if (std::find(result.limitations.begin(), result.limitations.end(), limitation) == result.limitations.end())
+                result.limitations.push_back(limitation);
+        }
         for (const auto* insn : view.instructions) {
             const auto mnemonic = lower(insn->mnemonic);
             const bool is_call = mnemonic == "call" || mnemonic == "callq";
@@ -1123,10 +1286,10 @@ void analyze_phase4(AnalysisReport& report) {
                         argument_count = target_signature->parameters.size();
                     }
                 }
-                const auto entry_args = entry_arguments_by_start.find(view.semantic->start_rva);
-                const std::set<std::string> empty_args;
-                auto flows = call_arguments_for(view, *insn, argument_count, last_definitions,
-                    entry_args == entry_arguments_by_start.end() ? empty_args : entry_args->second, target, callee);
+                const auto reaching_at_call = reaching.at_calls.find(insn->rva);
+                const auto* reaching_state = reaching_at_call == reaching.at_calls.end() ? nullptr : &reaching_at_call->second;
+                auto flows = call_arguments_for(view.semantic->start_rva, *insn, argument_count,
+                                                reaching_state, target, callee);
                 if (imported && iat) {
                     ImportedCallRecord record;
                     record.caller_start_rva = view.semantic->start_rva;
@@ -1159,10 +1322,6 @@ void analyze_phase4(AnalysisReport& report) {
                     for (auto& flow : flows) result.call_argument_flows.push_back(std::move(flow));
                     (void)target_signature;
                 }
-            }
-            for (const auto& reg : insn->registers_written) {
-                const auto canonical = canonical_register(reg);
-                if (!canonical.empty()) last_definitions[canonical] = insn;
             }
         }
     }
@@ -1214,7 +1373,7 @@ void analyze_phase4(AnalysisReport& report) {
         recover_structures(function, report.semantic_analysis, result);
 
     result.limitations.push_back("PDB TPI support is limited to procedure/argument-list records and scalar/modifier/pointer types; UDT layouts and general aggregate types remain unknown; RTTI discovery recognizes only bounded MSVC x64 COL/TypeDescriptor/CHD patterns");
-    result.limitations.push_back("register reaching definitions use a bounded linear scan and are not path-sensitive; call-argument provenance is labelled accordingly");
+    result.limitations.push_back("register reaching definitions use bounded CFG propagation over resolved in-function edges; conflicting values at merges and values after unresolved paths remain unknown; stack and memory reaching definitions are not modeled");
     result.limitations.push_back("indirect jump tables are not recognized as switches; unresolved or irreducible flow stays in the CFG/disassembly representation");
     result.limitations.push_back("confidence values are evidence-strength labels; calibration is measured only by the checked-in Gate 4 ground-truth benchmark");
     result.status = "partial";

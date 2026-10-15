@@ -1042,9 +1042,84 @@ bool phase4_import_dataflow_tests() {
     if (import_call.name != "ExitProcess" || import_call.prototype_status != "catalogued" ||
         import_call.return_type != "void" || import_call.parameter_types != std::vector<std::string>{"UINT"} ||
         import_call.arguments.size() != 1U || import_call.arguments[0].argument_register != "rcx" ||
-        import_call.arguments[0].source_kind != "linear_register_definition" ||
+        import_call.arguments[0].source_kind != "cfg_register_definition" ||
         import_call.arguments[0].source_rva != 0x1000U) {
         std::cerr << "Import prototype or call-site argument provenance is incomplete\n"; return false;
+    }
+    return true;
+}
+
+bool phase4_cfg_reaching_definition_tests() {
+    nexusrev::AnalysisReport report;
+    configure_pe(report);
+    auto test_entry = synthetic_instruction(0x1000U, "test", "85 c9");
+    auto ecx_read = reg_operand("ecx", 1U); ecx_read.size = 4U;
+    test_entry.detail_operands = {ecx_read, ecx_read};
+    test_entry.registers_read = {"ecx"};
+    report.instructions.push_back(test_entry);
+    auto branch = synthetic_instruction(0x1002U, "jne", "75 05");
+    branch.detail_operands = {imm_operand(0x140001009ULL)};
+    report.instructions.push_back(branch);
+    auto conditional_write = synthetic_instruction(0x1004U, "mov", "b9 07 00 00 00");
+    auto ecx_write = reg_operand("ecx", 2U); ecx_write.size = 4U;
+    auto seven = imm_operand(7U); seven.size = 4U;
+    conditional_write.detail_operands = {ecx_write, seven};
+    conditional_write.registers_written = {"ecx"};
+    report.instructions.push_back(conditional_write);
+    auto call = synthetic_instruction(0x1009U, "call", "e8 12 00 00 00");
+    call.detail_operands = {imm_operand(0x140001020ULL)};
+    report.instructions.push_back(call);
+    report.instructions.push_back(synthetic_instruction(0x100eU, "ret", "c3"));
+    auto callee_move = synthetic_instruction(0x1020U, "mov", "8b c1");
+    auto eax_write = reg_operand("eax", 2U); eax_write.size = 4U;
+    callee_move.detail_operands = {eax_write, ecx_read};
+    callee_move.registers_read = {"ecx"};
+    callee_move.registers_written = {"eax"};
+    report.instructions.push_back(callee_move);
+    report.instructions.push_back(synthetic_instruction(0x1022U, "ret", "c3"));
+
+    nexusrev::FunctionRecord caller;
+    caller.entity_kind = "candidate_function"; caller.boundary_status = "evidence_bounded";
+    caller.start_rva = 0x1000U; caller.end_rva = 0x100fU; caller.label = "branching_caller";
+    caller.evidence.push_back({"synthetic_test", "CFG reaching-definition merge fixture", 1.0,
+                               std::nullopt, 0x1000U, 0x100fU});
+    report.function_recovery.candidate_functions.push_back(caller);
+    nexusrev::FunctionRecord callee = caller;
+    callee.start_rva = 0x1020U; callee.end_rva = 0x1023U; callee.label = "typed_callee";
+    callee.evidence.clear();
+    callee.evidence.push_back({"synthetic_test", "typed direct callee fixture", 1.0,
+                               std::nullopt, 0x1020U, 0x1023U});
+    report.function_recovery.candidate_functions.push_back(callee);
+    report.symbols.status = "matched";
+    nexusrev::PdbFunctionSymbol symbol;
+    symbol.name = "typed_callee"; symbol.start_rva = 0x1020U; symbol.type_index = 0x1008U;
+    symbol.type_status = "decoded"; symbol.return_type = "int"; symbol.parameter_types = {"int"};
+    symbol.type_provenance = "pdb_tpi_procedure_record";
+    report.symbols.functions.push_back(symbol);
+
+    nexusrev::analyze_semantics(report);
+    nexusrev::analyze_phase4(report);
+    const auto caller_signature = std::find_if(report.phase4_analysis.signatures.begin(),
+        report.phase4_analysis.signatures.end(), [](const auto& item) {
+            return item.function_start_rva == 0x1000U;
+        });
+    const auto flow = std::find_if(report.phase4_analysis.call_argument_flows.begin(),
+        report.phase4_analysis.call_argument_flows.end(), [](const auto& item) {
+            return item.caller_start_rva == 0x1000U && item.call_rva == 0x1009U && item.parameter_index == 0U;
+        });
+    const bool merge_evidence = flow != report.phase4_analysis.call_argument_flows.end() &&
+        std::any_of(flow->evidence.begin(), flow->evidence.end(), [](const auto& item) {
+            return item.source == "cfg_reaching_definition_merge_conflict" && item.confidence == 0.0;
+        });
+    if (caller_signature == report.phase4_analysis.signatures.end() || caller_signature->parameters.empty() ||
+        caller_signature->parameters[0].type != "unknown" ||
+        flow == report.phase4_analysis.call_argument_flows.end() || flow->source_kind != "unknown" ||
+        flow->source_rva.has_value() || flow->argument_type != "unknown" || flow->type_status != "unknown" ||
+        flow->confidence != 0.0 || !merge_evidence ||
+        !std::any_of(report.semantic_analysis.cfg_edges.begin(), report.semantic_analysis.cfg_edges.end(),
+            [](const auto& edge) { return edge.kind == "conditional_true"; })) {
+        std::cerr << "branch-merge conflict was not kept unknown at the call site\n";
+        return false;
     }
     return true;
 }
@@ -1156,7 +1231,8 @@ int main() {
         !legacy_movq_semantics_tests() ||
         !cfg_and_reference_tests() || !phase9_switch_flow_tests() ||
         !phase4_stack_and_signature_tests() || !phase4_import_dataflow_tests() ||
-        !phase4_callee_type_propagation_tests() || !phase4_rtti_vtable_tests()) return 1;
+        !phase4_cfg_reaching_definition_tests() || !phase4_callee_type_propagation_tests() ||
+        !phase4_rtti_vtable_tests()) return 1;
     if (!stop_control_tests()) return 1;
     std::cout << "SHA-256, PE parser, Phase 3 semantic/CFG, Phase 4 ABI/dataflow, and reference tests passed\n";
     return 0;
