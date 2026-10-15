@@ -1,4 +1,4 @@
-name: Phase 1/2/3/4/5/6 CI
+name: NexussREV CI — Phase 14 cross-engine acceptance
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   linux-x64:
-    name: Linux x64 build, tests and release hardening (Phase 1/2/3/4/5/6)
+    name: Linux x64 CI and Phase 14 release evidence
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -37,7 +37,7 @@ jobs:
       - name: Build
         run: cmake --build build --parallel 2
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --output-junit "$GITHUB_WORKSPACE/build/ctest-results.xml"
       - name: Generate SBOM and package
         shell: bash
         run: |
@@ -63,7 +63,7 @@ jobs:
       - name: Build and run optional Zydis decoder cross-check
         run: |
           cmake --build build-zydis --target nexusrev_decoder_crosscheck --parallel 2
-          ctest --test-dir build-zydis -R '^nexusrev_decoder_crosscheck$' --output-on-failure
+          ctest --test-dir build-zydis -R '^nexusrev_decoder_crosscheck$' --output-on-failure --output-junit "$GITHUB_WORKSPACE/build-zydis/ctest-results.xml"
       - name: Build and run bounded Clang libFuzzer smoke
         shell: bash
         run: |
@@ -117,9 +117,35 @@ jobs:
           name: phase2-minGW-benchmark
           path: build/phase2-toolchain-matrix/*.json
           if-no-files-found: ignore
+      - name: Generate Phase 14 acceptance manifest
+        run: |
+          archive="$(find build -maxdepth 1 -type f -name 'NexussREV-*.tar.gz' -print -quit)"
+          test -n "$archive"
+          python3 tools/generate_acceptance_manifest.py \
+            --platform linux-x64 \
+            --commit "$GITHUB_SHA" \
+            --phase4-report build/phase4-benchmark-results.json \
+            --phase5-report build/phase5-validation-results.json \
+            --sbom build/sbom.cdx.json \
+            --package "$archive" \
+            --ctest-results build/ctest-results.xml \
+            --zydis-ctest-results build-zydis/ctest-results.xml \
+            --optional-installed-root build/vcpkg_installed \
+            --license-inventory docs/dependency-license-inventory.md \
+            --vcpkg-manifest vcpkg.json \
+            --output build/phase14-acceptance-manifest.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase14-linux-acceptance
+          path: |
+            build/phase14-acceptance-manifest.json
+            build/ctest-results.xml
+            build-zydis/ctest-results.xml
+          if-no-files-found: ignore
 
   windows-x64:
-    name: Windows x64 build, tests and release hardening (Phase 1/2/3/4/5/6)
+    name: Windows x64 CI and Phase 14 release evidence
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -148,7 +174,7 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel 2
       - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
+        run: ctest --test-dir build -C Release --output-on-failure --output-junit "$env:GITHUB_WORKSPACE/build/ctest-results.xml"
       - name: Generate SBOM and package
         shell: pwsh
         run: |
@@ -176,7 +202,7 @@ jobs:
         shell: pwsh
         run: |
           cmake --build build-zydis --config Release --target nexusrev_decoder_crosscheck --parallel 2
-          ctest --test-dir build-zydis -C Release -R '^nexusrev_decoder_crosscheck$' --output-on-failure
+          ctest --test-dir build-zydis -C Release -R '^nexusrev_decoder_crosscheck$' --output-on-failure --output-junit "$env:GITHUB_WORKSPACE/build-zydis/ctest-results.xml"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -249,4 +275,31 @@ jobs:
         with:
           name: phase2-windows-compiler-benchmarks
           path: build/phase2-toolchain-matrix/*.json
+          if-no-files-found: ignore
+      - name: Generate Phase 14 acceptance manifest
+        shell: pwsh
+        run: |
+          $archive = Get-ChildItem build -Filter 'NexussREV-*.zip' | Select-Object -First 1
+          if (-not $archive) { throw "CPack ZIP package not found" }
+          python tools/generate_acceptance_manifest.py `
+            --platform windows-x64 `
+            --commit $env:GITHUB_SHA `
+            --phase4-report build/phase4-benchmark-results.json `
+            --phase5-report build/phase5-validation-results.json `
+            --sbom build/sbom.cdx.json `
+            --package $archive.FullName `
+            --ctest-results "$env:GITHUB_WORKSPACE/build/ctest-results.xml" `
+            --zydis-ctest-results "$env:GITHUB_WORKSPACE/build-zydis/ctest-results.xml" `
+            --optional-installed-root build/vcpkg_installed `
+            --license-inventory docs/dependency-license-inventory.md `
+            --vcpkg-manifest vcpkg.json `
+            --output build/phase14-acceptance-manifest.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: phase14-windows-acceptance
+          path: |
+            build/phase14-acceptance-manifest.json
+            build/ctest-results.xml
+            build-zydis/ctest-results.xml
           if-no-files-found: ignore
