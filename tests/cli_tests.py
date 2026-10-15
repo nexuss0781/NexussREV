@@ -6,6 +6,7 @@ import hashlib
 import json
 import jsonschema
 import pathlib
+import struct
 import subprocess
 import sys
 import tempfile
@@ -51,6 +52,7 @@ def main():
     assert "pseudocode" in help_result.stdout
     assert "PE32+ x86-64" in help_result.stdout
     assert "--pdb" in help_result.stdout
+    assert "--decode-strategy" in help_result.stdout
     fixture_hash = hashlib.sha256(args.fixture.read_bytes()).hexdigest()
     overwrite_result = run(args.program, args.fixture, args.fixture)
     assert overwrite_result.returncode == 2
@@ -208,6 +210,86 @@ def main():
         assert (first["rva"], first["va"], first["file_offset"], first["bytes"]) == (
             0x1000, 0x140001000, 0x200, "48 89 d8"
         )
+
+        range_fixture = root / "two-function-ranges.exe"
+        range_image = bytearray(rich.read_bytes())
+        struct.pack_into("<I", range_image, 0x704, 0x1004)
+        struct.pack_into("<III", range_image, 0x70C, 0x1004, 0x1008, 0x3020)
+        struct.pack_into("<I", range_image, 0x124, 24)
+        range_image[0x720:0x724] = bytes((1, 1, 0, 0))
+        range_fixture.write_bytes(range_image)
+        range_outputs = []
+        for worker_count in (1, 2):
+            range_output = root / f"function-ranges-{worker_count}.disasm"
+            range_result = run(args.program, "--decode-strategy", "function-ranges",
+                               "--decode-workers", str(worker_count), range_fixture, range_output)
+            assert range_result.returncode == 0, range_result.stderr
+            range_report = json.loads(pathlib.Path(str(range_output) + ".report.json").read_text(encoding="utf-8"))
+            validate_report(range_report, report_validator)
+            assert len(range_report["pe"]["runtime_functions"]) == 2
+            assert any(item["code"] == "FUNCTION_RANGE_DECODE_USED"
+                       for item in range_report["diagnostics"])
+            assert any(item["code"] == "FUNCTION_RANGE_WORKLIST_USED"
+                       for item in range_report["diagnostics"])
+            range_decode = range_report["decode"]
+            assert range_decode["decoded_bytes"] + range_decode["undecoded_bytes"] == range_decode["processed_bytes"]
+            assert range_decode["processed_bytes"] + range_decode["limited_bytes"] == \
+                range_decode["executable_file_backed_bytes"]
+            range_rvas = [item["rva"] for item in range_decode["instructions"]]
+            assert range_rvas == sorted(set(range_rvas))
+            range_outputs.append((range_decode, range_report["semantic_analysis"]))
+        assert range_outputs[0] == range_outputs[1], "function-range results changed with worker count"
+
+        worklist_fixture = root / "branch-worklist.exe"
+        worklist_image = bytearray(rich.read_bytes())
+        worklist_image[0x200:0x209] = bytes.fromhex("eb 02 06 06 75 02 c3 06 c3")
+        struct.pack_into("<I", worklist_image, 0x190, 9)
+        struct.pack_into("<I", worklist_image, 0x198, 9)
+        struct.pack_into("<I", worklist_image, 0x704, 0x1009)
+        worklist_fixture.write_bytes(worklist_image)
+        worklist_output = root / "branch-worklist.disasm"
+        worklist_result = run(args.program, "--decode-strategy", "function-ranges",
+                              worklist_fixture, worklist_output)
+        assert worklist_result.returncode == 0, worklist_result.stderr
+        worklist_report = json.loads(
+            pathlib.Path(str(worklist_output) + ".report.json").read_text(encoding="utf-8"))
+        validate_report(worklist_report, report_validator)
+        worklist_decode = worklist_report["decode"]
+        assert [item["rva"] for item in worklist_decode["instructions"]] == [
+            0x1000, 0x1004, 0x1006, 0x1008
+        ]
+        assert worklist_decode["processed_bytes"] == 6
+        assert worklist_decode["limited_bytes"] == 3
+        assert worklist_decode["decoded_bytes"] == 6
+        limit_ranges = sorted((item["rva"], item["size"])
+                              for item in worklist_decode["gaps"]
+                              if item["reason"] == "analysis_limit")
+        assert limit_ranges == [(0x1002, 2), (0x1007, 1)]
+        assert not any(item["reason"] == "decoder_rejected"
+                       for item in worklist_decode["gaps"])
+        branch_semantics = {item["rva"]: item
+                            for item in worklist_report["semantic_analysis"]["instructions"]}
+        assert branch_semantics[0x1000]["control_flow"] == "direct_branch"
+        assert branch_semantics[0x1000]["target_rva"] == 0x1004
+        assert branch_semantics[0x1004]["control_flow"] == "conditional_branch"
+        assert branch_semantics[0x1004]["target_rva"] == 0x1008
+
+        auto_range_fixture = generate("auto-function-ranges.exe", "--auto-function-ranges")
+        auto_range_output = root / "auto-function-ranges.disasm"
+        auto_range_result = run(args.program, "--decode-strategy", "auto", "--decode-workers", "2",
+                                auto_range_fixture, auto_range_output)
+        assert auto_range_result.returncode == 0, auto_range_result.stderr
+        auto_range_report = json.loads(
+            pathlib.Path(str(auto_range_output) + ".report.json").read_text(encoding="utf-8"))
+        validate_report(auto_range_report, report_validator)
+        assert len(auto_range_report["pe"]["runtime_functions"]) == 512
+        assert any(item["code"] == "FUNCTION_RANGE_DECODE_USED"
+                   for item in auto_range_report["diagnostics"])
+        auto_decode = auto_range_report["decode"]
+        assert auto_decode["instruction_count"] == 8192
+        assert auto_decode["processed_bytes"] + auto_decode["limited_bytes"] == \
+            auto_decode["executable_file_backed_bytes"]
+        assert auto_decode["decoded_bytes"] + auto_decode["undecoded_bytes"] == auto_decode["processed_bytes"]
 
         compiler_output = root / "compiler-generated.disasm"
         compiler_result = run(args.program, args.compiler_fixture, compiler_output)

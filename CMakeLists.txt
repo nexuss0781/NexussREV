@@ -12,6 +12,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(LIEF 0.17.6 CONFIG REQUIRED)
 find_package(capstone 5.0.9 CONFIG REQUIRED)
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+find_package(Threads REQUIRED)
 
 add_executable(nexusrev
     src/main.cpp
@@ -23,7 +24,7 @@ add_executable(nexusrev
     src/sha256.cpp
 )
 target_include_directories(nexusrev PRIVATE include)
-target_link_libraries(nexusrev PRIVATE LIEF::LIEF capstone::capstone)
+target_link_libraries(nexusrev PRIVATE LIEF::LIEF capstone::capstone Threads::Threads)
 target_compile_definitions(nexusrev PRIVATE
     NEXUSREV_VERSION="${PROJECT_VERSION}"
     NEXUSREV_LIEF_VERSION="0.17.6"
@@ -61,7 +62,7 @@ add_executable(nexusrev_unit_tests
     src/sha256.cpp
 )
 target_include_directories(nexusrev_unit_tests PRIVATE include)
-target_link_libraries(nexusrev_unit_tests PRIVATE LIEF::LIEF capstone::capstone)
+target_link_libraries(nexusrev_unit_tests PRIVATE LIEF::LIEF capstone::capstone Threads::Threads)
 nexusrev_apply_build_options(nexusrev_unit_tests)
 add_test(NAME nexusrev_unit_tests COMMAND nexusrev_unit_tests)
 

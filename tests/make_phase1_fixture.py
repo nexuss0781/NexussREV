@@ -128,14 +128,77 @@ def build_pe(machine=0x8664, clr=False):
     return bytes(data)
 
 
+def build_auto_function_range_pe():
+    """Create an inert large PE that crosses auto mode's size and range-count thresholds."""
+    function_count = 512
+    text_size = 0x800000
+    pdata_va = 0x801000
+    pdata_raw = 0x800200
+    exception_size = function_count * 12
+    pdata_raw_size = 0x4000
+    data = bytearray(pdata_raw + pdata_raw_size)
+    data[0:2] = b"MZ"
+    put32(data, 0x3C, 0x80)
+    data[0x80:0x84] = b"PE\0\0"
+    coff = 0x84
+    put16(data, coff, 0x8664)
+    put16(data, coff + 2, 2)
+    put16(data, coff + 16, 0xF0)
+    put16(data, coff + 18, 0x0022)
+    opt = 0x98
+    put16(data, opt, 0x20B)
+    put32(data, opt + 4, text_size)
+    put32(data, opt + 16, 0x1000)
+    put32(data, opt + 20, 0x1000)
+    put64(data, opt + 24, IMAGE_BASE)
+    put32(data, opt + 32, 0x1000)
+    put32(data, opt + 36, 0x200)
+    put32(data, opt + 56, 0x805000)
+    put32(data, opt + 60, 0x200)
+    put16(data, opt + 68, 3)
+    put16(data, opt + 70, 0x8160)
+    put32(data, opt + 108, 16)
+
+    section_table = 0x188
+    sections = [
+        (b".text", text_size, 0x1000, text_size, 0x200, 0x60000020),
+        (b".pdata", pdata_raw_size, pdata_va, pdata_raw_size, pdata_raw, 0x40000040),
+    ]
+    for index, (name, vsize, rva, raw_size, raw_offset, flags) in enumerate(sections):
+        off = section_table + index * 40
+        data[off:off + len(name)] = name
+        put32(data, off + 8, vsize)
+        put32(data, off + 12, rva)
+        put32(data, off + 16, raw_size)
+        put32(data, off + 20, raw_offset)
+        put32(data, off + 36, flags)
+
+    put32(data, opt + 112 + 3 * 8, pdata_va)
+    put32(data, opt + 112 + 3 * 8 + 4, exception_size)
+    unwind_base_rva = pdata_va + exception_size
+    unwind_base_offset = pdata_raw + exception_size
+    for index in range(function_count):
+        begin_rva = 0x1000 + index * 16
+        text_offset = 0x200 + index * 16
+        data[text_offset:text_offset + 16] = b"\x90" * 15 + b"\xc3"
+        entry_offset = pdata_raw + index * 12
+        put32(data, entry_offset, begin_rva)
+        put32(data, entry_offset + 4, begin_rva + 16)
+        put32(data, entry_offset + 8, unwind_base_rva + index * 4)
+        data[unwind_base_offset + index * 4:unwind_base_offset + index * 4 + 4] = bytes((1, 0, 0, 0))
+    return bytes(data)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--machine", type=lambda value: int(value, 0), default=0x8664)
     parser.add_argument("--clr", action="store_true")
+    parser.add_argument("--auto-function-ranges", action="store_true")
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_bytes(build_pe(machine=args.machine, clr=args.clr))
+    fixture = build_auto_function_range_pe() if args.auto_function_ranges else build_pe(machine=args.machine, clr=args.clr)
+    args.output.write_bytes(fixture)
 
 
 if __name__ == "__main__":

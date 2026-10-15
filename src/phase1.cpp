@@ -2,17 +2,23 @@
 
 #include <LIEF/LIEF.hpp>
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <limits>
+#include <map>
+#include <mutex>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <streambuf>
 #include <string_view>
+#include <thread>
 #include <utility>
 
 #include "sha256.hpp"
@@ -321,7 +327,7 @@ InstructionRecord make_instruction_record(const cs_insn& insn, csh handle,
     return record;
 }
 
-void decode_sections(AnalysisReport& report, csh handle) {
+void decode_sections_linear(AnalysisReport& report, csh handle) {
     struct InsnDeleter {
         void operator()(cs_insn* value) const { if (value != nullptr) cs_free(value, 1U); }
     };
@@ -424,6 +430,400 @@ void decode_sections(AnalysisReport& report, csh handle) {
     diagnostic(report, "SEMANTIC_ANALYSIS_BOUNDED", "info", "Phase 3 emits conservative x86-64 semantic IR and control-flow evidence; unsupported instructions and unresolved flow remain explicit, and source-level reconstruction is not claimed");
     report.stages.push_back({"analysis", "partial"});
     report.status = "partial";
+}
+
+struct FunctionRangeTask {
+    std::size_t section_index = 0U;
+    std::uint32_t begin_rva = 0U;
+    std::uint32_t end_rva = 0U;
+    std::size_t instruction_budget = 0U;
+    std::uint64_t byte_budget = 0U;
+};
+
+struct FunctionRangeResult {
+    std::vector<InstructionRecord> instructions;
+    std::vector<DecodeGap> gaps;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> processed_intervals;
+    std::uint64_t consumed_bytes = 0U;
+    std::uint64_t decoded_bytes = 0U;
+    std::uint64_t undecoded_bytes = 0U;
+};
+
+void append_task_bad_byte(FunctionRangeResult& result, std::size_t section_index,
+                          std::uint64_t image_base, std::uint32_t rva,
+                          std::uint64_t file_offset, std::uint8_t byte,
+                          std::size_t gap_record_limit) {
+    if (!result.gaps.empty()) {
+        auto& tail = result.gaps.back();
+        if (tail.section_index == section_index && tail.reason == "decoder_rejected" &&
+            tail.file_offset && static_cast<std::uint64_t>(tail.rva) + tail.size == rva &&
+            *tail.file_offset + tail.size == file_offset) {
+            tail.bytes += " " + bytes_hex(&byte, 1U);
+            ++tail.size;
+            ++result.undecoded_bytes;
+            return;
+        }
+    }
+    if (result.gaps.size() < gap_record_limit)
+        result.gaps.push_back({section_index, rva, image_base + rva, file_offset, 1U,
+                               bytes_hex(&byte, 1U), "decoder_rejected"});
+    ++result.undecoded_bytes;
+}
+
+bool decode_runtime_function_ranges(AnalysisReport& report, std::size_t requested_workers) {
+    constexpr std::size_t kMaximumFunctionTasks = 1024U;
+    constexpr std::size_t kMaximumDecodeWorkers = 8U;
+    std::vector<FunctionRangeTask> candidates;
+    candidates.reserve(std::min(report.pe.runtime_functions.size(), kMaxRuntimeFunctionRecords));
+    for (const auto& runtime : report.pe.runtime_functions) {
+        if (!runtime.unwind_info_available || runtime.begin_rva >= runtime.end_rva) continue;
+        const auto mapping = report.pe.map_rva(runtime.begin_rva);
+        if (!mapping.mapped || mapping.virtual_zero_fill || mapping.section_index < 0) continue;
+        const auto section_index = static_cast<std::size_t>(mapping.section_index);
+        if (section_index >= report.pe.sections.size()) continue;
+        const auto& section = report.pe.sections[section_index];
+        if (!section.executable || runtime.begin_rva < section.virtual_address) continue;
+        const std::uint64_t section_file_end =
+            static_cast<std::uint64_t>(section.virtual_address) + section.file_backed_size;
+        if (runtime.end_rva > section_file_end ||
+            static_cast<std::uint64_t>(runtime.end_rva - runtime.begin_rva) > mapping.available_file_bytes)
+            continue;
+        candidates.push_back({section_index, runtime.begin_rva, runtime.end_rva, 0U, 0U});
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const auto& left, const auto& right) {
+        if (left.section_index != right.section_index) return left.section_index < right.section_index;
+        if (left.begin_rva != right.begin_rva) return left.begin_rva < right.begin_rva;
+        return left.end_rva < right.end_rva;
+    });
+    std::vector<FunctionRangeTask> non_overlapping;
+    non_overlapping.reserve(candidates.size());
+    for (const auto& candidate : candidates) {
+        if (!non_overlapping.empty() &&
+            non_overlapping.back().section_index == candidate.section_index &&
+            candidate.begin_rva < non_overlapping.back().end_rva)
+            continue;
+        if (!non_overlapping.empty() &&
+            non_overlapping.back().section_index == candidate.section_index &&
+            candidate.begin_rva == non_overlapping.back().begin_rva)
+            continue;
+        non_overlapping.push_back(candidate);
+    }
+    if (non_overlapping.empty()) return false;
+
+    const std::size_t task_count = std::min(non_overlapping.size(), kMaximumFunctionTasks);
+    std::vector<FunctionRangeTask> tasks;
+    tasks.reserve(task_count);
+    for (std::size_t i = 0U; i < task_count; ++i) {
+        const std::size_t candidate_index = (i * non_overlapping.size()) / task_count;
+        tasks.push_back(non_overlapping[candidate_index]);
+    }
+    const std::size_t instructions_per_task = kMaxInstructions / task_count;
+    const std::size_t extra_instruction_slots = kMaxInstructions % task_count;
+    const std::uint64_t bytes_per_task = kMaxDecodeBytes / task_count;
+    const std::uint64_t extra_byte_slots = kMaxDecodeBytes % task_count;
+    for (std::size_t i = 0U; i < tasks.size(); ++i) {
+        tasks[i].instruction_budget = instructions_per_task + (i < extra_instruction_slots ? 1U : 0U);
+        tasks[i].byte_budget = bytes_per_task + (i < extra_byte_slots ? 1U : 0U);
+    }
+
+    for (std::size_t i = 0U; i < report.pe.sections.size(); ++i) {
+        const auto& section = report.pe.sections[i];
+        if (!section.executable) continue;
+        report.decode.executable_file_backed_bytes += section.file_backed_size;
+        if (section.zero_fill_size != 0U) {
+            report.decode.executable_zero_fill_bytes += section.zero_fill_size;
+            const std::uint64_t rva = static_cast<std::uint64_t>(section.virtual_address) + section.raw_size;
+            if (report.decode_gaps.size() < kMaxDecodeGaps && rva <= UINT32_MAX)
+                report.decode_gaps.push_back({i, static_cast<std::uint32_t>(rva), report.pe.image_base + rva,
+                    std::nullopt, section.zero_fill_size, {}, "virtual_zero_fill_not_file_backed"});
+        }
+    }
+
+    std::vector<FunctionRangeResult> results(tasks.size());
+    std::atomic<std::size_t> next_task{0U};
+    std::atomic<bool> worker_failed{false};
+    std::mutex error_mutex;
+    std::string worker_error;
+    std::string worker_error_code = "FUNCTION_RANGE_DECODE_FAILED";
+    const auto fail_worker = [&](const char* code, const char* message) {
+        bool expected = false;
+        if (!worker_failed.compare_exchange_strong(expected, true)) return;
+        try {
+            std::lock_guard<std::mutex> guard(error_mutex);
+            worker_error_code = code;
+            worker_error = message;
+        } catch (...) {}
+    };
+    const std::size_t per_task_gap_limit = std::max<std::size_t>(
+        1U, kMaxDecodeGapRecords / tasks.size() + 1U);
+    const auto worker = [&]() {
+        csh handle = 0;
+        if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK) {
+            fail_worker("DECODER_INITIALIZATION_FAILED", "unable to initialize a Capstone handle for a function-range worker");
+            return;
+        }
+        if (cs_option(handle, CS_OPT_DETAIL, CS_OPT_ON) != CS_ERR_OK) {
+            cs_close(&handle);
+            fail_worker("DECODER_DETAIL_FAILED", "unable to enable Capstone detail mode for a function-range worker");
+            return;
+        }
+        try {
+            struct InsnDeleter {
+                void operator()(cs_insn* value) const { if (value != nullptr) cs_free(value, 1U); }
+            };
+            std::unique_ptr<cs_insn, InsnDeleter> instruction(cs_malloc(handle));
+            if (!instruction) {
+                fail_worker("DECODER_ALLOCATION_FAILED", "Capstone could not allocate an instruction record for a function-range worker");
+                cs_close(&handle);
+                return;
+            }
+            while (!worker_failed.load()) {
+            const std::size_t task_index = next_task.fetch_add(1U);
+            if (task_index >= tasks.size()) break;
+            const auto& task = tasks[task_index];
+            auto& result = results[task_index];
+            const auto& section = report.pe.sections[task.section_index];
+            const std::uint64_t range_size = static_cast<std::uint64_t>(task.end_rva) - task.begin_rva;
+            const std::uint64_t window_size = std::min(range_size, task.byte_budget);
+            if (window_size > std::numeric_limits<std::size_t>::max()) {
+                fail_worker("FUNCTION_RANGE_SIZE_INVALID", "function range exceeds the addressable decode window");
+                break;
+            }
+            std::vector<std::uint8_t> code;
+            if (!report.pe.read_rva(task.begin_rva, static_cast<std::size_t>(window_size), code)) {
+                fail_worker("FUNCTION_RANGE_CONTENT_UNREADABLE", "validated runtime-function bytes could not be read from the input snapshot");
+                break;
+            }
+            const std::uint64_t window_end64 = static_cast<std::uint64_t>(task.begin_rva) + window_size;
+            const auto window_end = static_cast<std::uint32_t>(window_end64);
+            std::set<std::uint32_t> pending;
+            std::set<std::uint32_t> enqueued;
+            std::map<std::uint32_t, std::uint32_t> occupied;
+            pending.insert(task.begin_rva);
+            enqueued.insert(task.begin_rva);
+            const auto enqueue_rva = [&](std::uint32_t target) {
+                if (target >= task.begin_rva && target < window_end && enqueued.insert(target).second)
+                    pending.insert(target);
+            };
+            while (!pending.empty() && result.instructions.size() < task.instruction_budget &&
+                   result.consumed_bytes < task.byte_budget) {
+                if (current_stop_reason() != StopReason::none) break;
+                std::uint32_t current = *pending.begin();
+                pending.erase(pending.begin());
+                while (current < window_end && result.instructions.size() < task.instruction_budget &&
+                       result.consumed_bytes < task.byte_budget) {
+                    if (current_stop_reason() != StopReason::none) break;
+                    const auto next_occupied = occupied.upper_bound(current);
+                    if ((next_occupied != occupied.begin() && std::prev(next_occupied)->second > current) ||
+                        (next_occupied != occupied.end() && next_occupied->first == current))
+                        break;
+                    const std::size_t pos = static_cast<std::size_t>(current - task.begin_rva);
+                    const std::uint64_t rva64 = current;
+                    if (rva64 > UINT32_MAX || report.pe.image_base > UINT64_MAX - rva64) {
+                        fail_worker("FUNCTION_RANGE_ADDRESS_INVALID", "runtime-function address overflows the supported PE address model");
+                        break;
+                    }
+                    const std::uint64_t file_offset = static_cast<std::uint64_t>(section.raw_offset) +
+                        (static_cast<std::uint64_t>(task.begin_rva) - section.virtual_address) + pos;
+                    const std::uint8_t* cursor = code.data() + pos;
+                    const std::uint8_t* next = cursor;
+                    std::size_t next_left = code.size() - pos;
+                    std::uint64_t address = report.pe.image_base + rva64;
+                    if (cs_disasm_iter(handle, &next, &next_left, &address, instruction.get())) {
+                        const std::size_t size = static_cast<std::size_t>(next - cursor);
+                        if (size == 0U) {
+                            append_task_bad_byte(result, task.section_index, report.pe.image_base,
+                                                 current, file_offset, code[pos], per_task_gap_limit);
+                            result.processed_intervals.emplace_back(pos, pos + 1U);
+                            ++result.consumed_bytes;
+                            ++current;
+                            continue;
+                        }
+                        const std::uint64_t next_rva64 = static_cast<std::uint64_t>(current) + size;
+                        const auto overlap = occupied.lower_bound(current);
+                        if (next_rva64 > window_end64 ||
+                            (overlap != occupied.end() && overlap->first < next_rva64) ||
+                            (overlap != occupied.begin() && std::prev(overlap)->second > current))
+                            break;
+                        result.instructions.push_back(make_instruction_record(*instruction, handle, task.section_index,
+                            instruction->address, current, file_offset));
+                        occupied.emplace(current, static_cast<std::uint32_t>(next_rva64));
+                        result.processed_intervals.emplace_back(pos, pos + static_cast<std::uint32_t>(size));
+                        result.consumed_bytes += size;
+                        result.decoded_bytes += size;
+
+                        const bool is_call = cs_insn_group(handle, instruction.get(), CS_GRP_CALL);
+                        const bool is_jump = cs_insn_group(handle, instruction.get(), CS_GRP_JUMP);
+                        const bool is_return = cs_insn_group(handle, instruction.get(), CS_GRP_RET) ||
+                            std::strncmp(instruction->mnemonic, "iret", 4U) == 0;
+                        std::optional<std::uint32_t> branch_target;
+                        if (is_jump && instruction->detail != nullptr) {
+                            for (std::size_t operand_index = 0U;
+                                 operand_index < instruction->detail->x86.op_count; ++operand_index) {
+                                const auto& operand = instruction->detail->x86.operands[operand_index];
+                                if (operand.type != X86_OP_IMM) continue;
+                                std::uint32_t target = 0U;
+                                if (report.pe.va_to_rva(static_cast<std::uint64_t>(operand.imm), target))
+                                    branch_target = target;
+                                break;
+                            }
+                        }
+                        const std::uint32_t fallthrough = static_cast<std::uint32_t>(next_rva64);
+                        if (is_return) break;
+                        if (is_call) {
+                            current = fallthrough;
+                            continue;
+                        }
+                        if (is_jump) {
+                            if (branch_target) enqueue_rva(*branch_target);
+                            const bool unconditional = std::strcmp(instruction->mnemonic, "jmp") == 0 ||
+                                std::strcmp(instruction->mnemonic, "jmpq") == 0 ||
+                                std::strcmp(instruction->mnemonic, "ljmp") == 0 ||
+                                std::strcmp(instruction->mnemonic, "ljmpq") == 0;
+                            if (unconditional) break;
+                        }
+                        current = fallthrough;
+                    } else if (truncated_x86_tail(code, pos)) {
+                        const std::size_t gap_size = code.size() - pos;
+                        if (result.gaps.size() < per_task_gap_limit) {
+                            result.gaps.push_back({task.section_index, current, report.pe.image_base + current,
+                                file_offset, gap_size, bytes_hex(code.data() + pos, gap_size), "truncated_instruction"});
+                        }
+                        result.processed_intervals.emplace_back(pos, pos + static_cast<std::uint32_t>(gap_size));
+                        result.consumed_bytes += gap_size;
+                        result.undecoded_bytes += gap_size;
+                        break;
+                    } else {
+                        append_task_bad_byte(result, task.section_index, report.pe.image_base,
+                                             current, file_offset, code[pos], per_task_gap_limit);
+                        result.processed_intervals.emplace_back(pos, pos + 1U);
+                        ++result.consumed_bytes;
+                        ++current;
+                    }
+                }
+            }
+            }
+        } catch (const std::exception&) {
+            fail_worker("FUNCTION_RANGE_WORKER_EXCEPTION", "function-range worker failed while allocating or processing a decode task");
+        } catch (...) {
+            fail_worker("FUNCTION_RANGE_WORKER_EXCEPTION", "function-range worker failed with an unknown exception");
+        }
+        cs_close(&handle);
+    };
+
+    unsigned int hardware_workers = std::thread::hardware_concurrency();
+    if (hardware_workers == 0U) hardware_workers = 1U;
+    const std::size_t available_workers = requested_workers == 0U ?
+        std::min<std::size_t>(hardware_workers, kMaximumDecodeWorkers) :
+        std::min<std::size_t>(requested_workers, kMaximumDecodeWorkers);
+    const std::size_t worker_count = std::min(tasks.size(), std::max<std::size_t>(1U, available_workers));
+    std::vector<std::thread> threads;
+    threads.reserve(worker_count);
+    try {
+        for (std::size_t i = 0U; i < worker_count; ++i) threads.emplace_back(worker);
+    } catch (const std::exception&) {
+        fail_worker("DECODE_WORKER_START_FAILED", "could not start the bounded decoder worker pool");
+    }
+    for (auto& thread : threads) if (thread.joinable()) thread.join();
+    const auto stop_reason = current_stop_reason();
+    if (stop_reason != StopReason::none) {
+        add_stop_diagnostic(report, stop_reason);
+        report.stages.push_back({"analysis", "failed"});
+        return true;
+    }
+    if (worker_failed.load()) {
+        diagnostic(report, worker_error_code, "error", worker_error.empty() ? "function-range decode worker failed" : worker_error);
+        report.stages.push_back({"analysis", "failed"});
+        report.status = "failed";
+        return true;
+    }
+
+    struct ProcessedInterval { std::size_t section_index; std::uint64_t begin; std::uint64_t end; };
+    std::vector<ProcessedInterval> processed_intervals;
+    processed_intervals.reserve(tasks.size());
+    for (std::size_t i = 0U; i < tasks.size(); ++i) {
+        const auto& task = tasks[i];
+        auto& result = results[i];
+        report.decode.processed_bytes += result.consumed_bytes;
+        report.decode.decoded_bytes += result.decoded_bytes;
+        report.decode.undecoded_bytes += result.undecoded_bytes;
+        report.decode.instruction_count += result.instructions.size();
+        report.instructions.insert(report.instructions.end(),
+            std::make_move_iterator(result.instructions.begin()), std::make_move_iterator(result.instructions.end()));
+        for (auto& gap : result.gaps)
+            if (report.decode_gaps.size() < kMaxDecodeGaps) report.decode_gaps.push_back(std::move(gap));
+        const auto& section = report.pe.sections[task.section_index];
+        const std::uint64_t section_offset = static_cast<std::uint64_t>(task.begin_rva) - section.virtual_address;
+        for (const auto& interval : result.processed_intervals)
+            processed_intervals.push_back({task.section_index, section_offset + interval.first,
+                                           section_offset + interval.second});
+    }
+    std::sort(processed_intervals.begin(), processed_intervals.end(), [](const auto& left, const auto& right) {
+        if (left.section_index != right.section_index) return left.section_index < right.section_index;
+        return left.begin < right.begin;
+    });
+    std::size_t interval_index = 0U;
+    for (std::size_t section_index = 0U; section_index < report.pe.sections.size(); ++section_index) {
+        const auto& section = report.pe.sections[section_index];
+        if (!section.executable || section.file_backed_size == 0U) continue;
+        std::uint64_t cursor = 0U;
+        while (interval_index < processed_intervals.size() &&
+               processed_intervals[interval_index].section_index == section_index) {
+            const auto& interval = processed_intervals[interval_index++];
+            if (interval.begin > cursor) add_limit_gap(report, section_index, cursor, interval.begin - cursor);
+            cursor = std::max(cursor, interval.end);
+        }
+        if (cursor < section.file_backed_size)
+            add_limit_gap(report, section_index, cursor, section.file_backed_size - cursor);
+    }
+    std::sort(report.instructions.begin(), report.instructions.end(), [](const auto& left, const auto& right) {
+        if (left.section_index != right.section_index) return left.section_index < right.section_index;
+        return left.rva < right.rva;
+    });
+    std::sort(report.decode_gaps.begin(), report.decode_gaps.end(), [](const auto& left, const auto& right) {
+        if (left.section_index != right.section_index) return left.section_index < right.section_index;
+        return left.rva < right.rva;
+    });
+    if (report.decode.executable_file_backed_bytes == 0U)
+        diagnostic(report, "NO_EXECUTABLE_FILE_BACKED_BYTES", "warning", "no file-backed executable section bytes were available for decoding");
+    diagnostic(report, "FUNCTION_RANGE_DECODE_USED", "info",
+        "decoded deterministic, stratified AMD64 RUNTIME_FUNCTION ranges with RVA-ordered control-flow worklists; unwind metadata is evidence, not proof of source-level function boundaries");
+    diagnostic(report, "FUNCTION_RANGE_WORKLIST_USED", "info",
+        "each selected validated range was seeded at its begin RVA; direct in-range branch targets and fallthrough were followed, while unvisited bytes remain analysis-limit gaps");
+    if (report.decode.limited_bytes != 0U)
+        diagnostic(report, "ANALYSIS_FUNCTION_RANGE_LIMIT", "info",
+            "bytes outside selected ranges, unreachable from worklist seeds, or beyond per-range budgets remain explicit analysis-limit gaps");
+    if (report.decode.undecoded_bytes != 0U)
+        diagnostic(report, "DECODE_GAPS_PRESENT", "warning", "some executable bytes were rejected by the decoder; exact intervals and byte values are reported where within the gap-record bound");
+    if (report.decode.executable_zero_fill_bytes != 0U)
+        diagnostic(report, "EXECUTABLE_ZERO_FILL_PRESENT", "info", "virtual zero-fill has no source-file bytes and was not decoded");
+    diagnostic(report, "SEMANTIC_ANALYSIS_BOUNDED", "info",
+        "Phase 3 emits conservative x86-64 semantic IR and control-flow evidence; unsupported instructions and unresolved flow remain explicit, and source-level reconstruction is not claimed");
+    report.stages.push_back({"analysis", "partial"});
+    report.status = "partial";
+    return true;
+}
+
+void decode_sections(AnalysisReport& report, csh handle, const std::string& strategy,
+                     std::size_t requested_workers) {
+    if (strategy != "linear" && strategy != "auto" && strategy != "function-ranges") {
+        diagnostic(report, "DECODE_STRATEGY_INVALID", "error", "decode strategy must be linear, auto, or function-ranges");
+        report.stages.push_back({"analysis", "failed"});
+        report.status = "failed";
+        return;
+    }
+    std::uint64_t executable_bytes = 0U;
+    for (const auto& section : report.pe.sections)
+        if (section.executable) executable_bytes += section.file_backed_size;
+    const bool automatic_function_ranges = strategy == "auto" && executable_bytes >= 8ULL * 1024ULL * 1024ULL &&
+        report.pe.runtime_functions.size() >= 512U;
+    if (strategy == "function-ranges" || automatic_function_ranges) {
+        if (decode_runtime_function_ranges(report, requested_workers)) return;
+        if (strategy == "function-ranges")
+            diagnostic(report, "FUNCTION_RANGE_NO_VALID_SEEDS", "warning",
+                "no validated file-backed AMD64 runtime-function ranges were available; falling back to linear decoding");
+    }
+    decode_sections_linear(report, handle);
 }
 
 void emit_diagnostics_json(std::ostream& output, const std::vector<Diagnostic>& diagnostics) {
@@ -770,7 +1170,8 @@ bool Decompiler::load_binary(const std::string& path, AnalysisReport& report) {
     return true;
 }
 
-bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path) {
+bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path,
+                         const std::string& decode_strategy, std::size_t decode_workers) {
     if (!report.pe.file_bytes) {
         diagnostic(report, "ANALYSIS_WITHOUT_INPUT", "error", "analysis requires a validated PE image");
         report.stages.push_back({"analysis", "failed"}); report.status = "failed"; return false;
@@ -803,7 +1204,7 @@ bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path) {
         cs_close(&capstone_handle_); capstone_handle_ = 0; report.stages.push_back({"analysis", "failed"}); report.status = "failed";
         diagnostic(report, "DECODER_DETAIL_FAILED", "error", "unable to enable Capstone instruction details"); return false;
     }
-    decode_sections(report, capstone_handle_);
+    decode_sections(report, capstone_handle_, decode_strategy, decode_workers);
     if (report.status != "failed") {
         recover_functions(report, pdb_path);
         analyze_semantics(report);

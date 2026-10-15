@@ -411,7 +411,9 @@ public:
     Decompiler(const Decompiler&) = delete;
     Decompiler& operator=(const Decompiler&) = delete;
     bool load_binary(const std::string& path, AnalysisReport& report);
-    bool analyze(AnalysisReport& report, const std::string& pdb_path = {});
+    bool analyze(AnalysisReport& report, const std::string& pdb_path = {},
+                 const std::string& decode_strategy = "linear",
+                 std::size_t decode_workers = 0U);
     std::string emit_annotated_disassembly(const AnalysisReport& report) const;
 private:
     csh capstone_handle_ = 0;

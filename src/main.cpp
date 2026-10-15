@@ -46,6 +46,8 @@ struct CliOptions {
     std::string reference_report_path;
     std::string format = "disassembly";
     std::string log_format = "text";
+    std::string decode_strategy = "linear";
+    std::uint64_t decode_workers = 0U;
     std::uint64_t timeout_ms = 0;
     std::uint64_t memory_limit_mib = 0;
 };
@@ -54,6 +56,7 @@ void print_usage(std::ostream& output, const char* executable) {
     output << "Usage: " << executable
            << " [--format disassembly|pseudocode] [--report-json <path>] [--pdb <matching.pdb>]\n"
            << " [--reference-report <ghidra.tsv>] [--log-format text|jsonl]\n"
+           << " [--decode-strategy linear|auto|function-ranges] [--decode-workers <1..8>]\n"
            << " [--timeout-ms <n>] [--memory-limit-mib <n>] <input.exe> <output>\n"
            << "       " << executable << " --help | --version\n\n"
            << "The supported analysis target is native PE32+ x86-64, treated as data only.\n"
@@ -254,6 +257,38 @@ bool parse_arguments(int argc, char** argv, CliOptions& options, bool& show_help
                 return false;
             }
             options.reference_report_path = argv[++index];
+            continue;
+        }
+        if (argument == "--decode-strategy") {
+            if (index + 1 >= argc) {
+                error = "--decode-strategy requires a value";
+                return false;
+            }
+            options.decode_strategy = argv[++index];
+            if (options.decode_strategy != "linear" && options.decode_strategy != "auto" &&
+                options.decode_strategy != "function-ranges") {
+                error = "unsupported decode strategy; choose 'linear', 'auto', or 'function-ranges'";
+                return false;
+            }
+            continue;
+        }
+        if (argument == "--decode-workers") {
+            if (index + 1 >= argc) {
+                error = "--decode-workers requires an integer from 1 to 8";
+                return false;
+            }
+            const std::string value = argv[++index];
+            std::uint64_t parsed = 0U;
+            try {
+                std::size_t consumed = 0U;
+                parsed = std::stoull(value, &consumed, 10);
+                if (consumed != value.size() || parsed == 0U || parsed > 8U)
+                    throw std::invalid_argument("invalid");
+            } catch (...) {
+                error = "--decode-workers must be an integer from 1 to 8";
+                return false;
+            }
+            options.decode_workers = parsed;
             continue;
         }
         if (argument == "--log-format") {
@@ -666,7 +701,8 @@ int main(int argc, char** argv) {
             if (reason != nexusrev::StopReason::none) return stop_exit_code(reason);
             return kInputFailure;
         }
-        if (!decompiler.analyze(report, options.pdb_path)) {
+        if (!decompiler.analyze(report, options.pdb_path, options.decode_strategy,
+                                static_cast<std::size_t>(options.decode_workers))) {
             print_diagnostics(report, options.log_format);
             const auto reason = nexusrev::analysis_stop_reason();
             const std::string stop_code = reason == nexusrev::StopReason::timed_out ?
