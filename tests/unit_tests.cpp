@@ -738,6 +738,127 @@ bool cfg_and_reference_tests() {
     return true;
 }
 
+bool phase9_switch_flow_tests() {
+    const auto make_fixture = [](nexusrev::AnalysisReport& report, std::uint64_t second_target) {
+        configure_pe(report);
+        report.pe.sections[0].raw_offset = 0x200U;
+        report.pe.sections[0].raw_size = 0x3000U;
+        std::vector<std::uint8_t> bytes(0x3200U, 0U);
+        put64(bytes, 0x400U, report.pe.image_base + 0x100fU);
+        put64(bytes, 0x408U, second_target);
+        report.pe.file_bytes = std::make_shared<const std::vector<std::uint8_t>>(std::move(bytes));
+        report.input_sha256 = std::string(64U, 'c');
+
+        auto lea = synthetic_instruction(0x1000U, "lea", "48 8d 15 f9 01 00 00");
+        auto rdx_write = reg_operand("rdx", 2U);
+        auto table_address = memory_operand("rip", 0x1f9, 8U, 1U);
+        lea.detail_operands = {rdx_write, table_address};
+        lea.registers_written = {"rdx"};
+        report.instructions.push_back(std::move(lea));
+
+        auto compare = synthetic_instruction(0x1007U, "cmp", "83 f9 01");
+        auto index_read = reg_operand("ecx", 1U); index_read.size = 4U;
+        auto max_index = imm_operand(1U); max_index.size = 1U;
+        compare.detail_operands = {index_read, max_index};
+        report.instructions.push_back(std::move(compare));
+
+        auto guard = synthetic_instruction(0x100aU, "ja", "77 08");
+        guard.detail_operands = {imm_operand(report.pe.image_base + 0x1014U)};
+        report.instructions.push_back(std::move(guard));
+
+        auto jump = synthetic_instruction(0x100cU, "jmp", "ff 24 ca");
+        auto table_entry = memory_operand("rdx", 0, 8U, 1U);
+        table_entry.index = "rcx";
+        table_entry.scale = 8;
+        jump.detail_operands = {table_entry};
+        report.instructions.push_back(std::move(jump));
+        report.instructions.push_back(synthetic_instruction(0x100fU, "ret", "c3"));
+        report.instructions.push_back(synthetic_instruction(0x1010U, "ret", "c3"));
+        report.instructions.push_back(synthetic_instruction(0x1011U, "nop", "90"));
+        report.instructions.push_back(synthetic_instruction(0x1012U, "nop", "90"));
+        report.instructions.push_back(synthetic_instruction(0x1013U, "nop", "90"));
+        report.instructions.push_back(synthetic_instruction(0x1014U, "ret", "c3"));
+
+        nexusrev::FunctionRecord function;
+        function.entity_kind = "candidate_function";
+        function.boundary_status = "evidence_bounded";
+        function.start_rva = 0x1000U;
+        function.end_rva = 0x1015U;
+        function.label = "labelled_switch_fixture";
+        function.evidence.push_back({"synthetic_test", "bounded labelled x64 switch with two table cases",
+                                    1.0, std::nullopt, 0x1000U, 0x1015U});
+        report.function_recovery.candidate_functions.push_back(function);
+        report.function_recovery.unresolved_control_flow.push_back({0x100cU, std::nullopt, "indirect_jump",
+            "indirect_control_flow_or_jump_table_not_resolved"});
+    };
+
+    nexusrev::AnalysisReport resolved;
+    make_fixture(resolved, 0x140001010ULL);
+    nexusrev::analyze_semantics(resolved);
+
+    std::vector<std::uint32_t> destinations;
+    for (const auto& edge : resolved.semantic_analysis.cfg_edges) {
+        if (edge.from_rva != 0x100cU || edge.kind != "indirect_branch") continue;
+        if (!edge.target_rva || !edge.to_block || edge.provenance != "bounded_va64_jump_table") {
+            std::cerr << "validated switch target did not map to a destination block with evidence provenance\n";
+            return false;
+        }
+        const auto block = std::find_if(resolved.semantic_analysis.basic_blocks.begin(),
+            resolved.semantic_analysis.basic_blocks.end(), [&edge](const auto& item) {
+                return edge.to_block && item.id == *edge.to_block;
+            });
+        if (block == resolved.semantic_analysis.basic_blocks.end() || block->start_rva != *edge.target_rva) {
+            std::cerr << "resolved switch edge target disagrees with its destination block boundary\n";
+            return false;
+        }
+        destinations.push_back(*edge.target_rva);
+    }
+    std::sort(destinations.begin(), destinations.end());
+    if (destinations != std::vector<std::uint32_t>({0x100fU, 0x1010U}) ||
+        resolved.semantic_analysis.functions.size() != 1U ||
+        !resolved.semantic_analysis.functions[0].semantic_complete ||
+        resolved.semantic_analysis.unresolved_control_flow_count != 0U ||
+        !resolved.function_recovery.unresolved_control_flow.empty()) {
+        std::cerr << "bounded jump table targets, CFG edges, or resolved-flow accounting were inconsistent\n";
+        return false;
+    }
+
+    const auto reference_path = std::filesystem::temp_directory_path() / "nexusrev-phase9-switch-reference.tsv";
+    {
+        std::ofstream reference(reference_path, std::ios::binary | std::ios::trunc);
+        reference << "NEXUSREV_GHIDRA_REFERENCE\t1\t" << resolved.input_sha256 << "\t11.3-test\n"
+                  << "F\t4096\n"
+                  << "E\t4106\tconditional_branch\t4116\n"
+                  << "E\t4108\tbranch\t4111\n"
+                  << "E\t4108\tbranch\t4112\n"
+                  << "E\t4111\treturn\t-\n"
+                  << "E\t4112\treturn\t-\n"
+                  << "E\t4116\treturn\t-\n";
+    }
+    nexusrev::compare_ghidra_reference(resolved, reference_path.string());
+    std::filesystem::remove(reference_path);
+    if (resolved.semantic_analysis.reference.status != "compared" ||
+        resolved.semantic_analysis.reference.difference_count != 0U ||
+        resolved.semantic_analysis.reference.compared_flow_count != 6U) {
+        std::cerr << "Ghidra-style multi-target switch-flow comparison did not match the labelled fixture\n";
+        return false;
+    }
+
+    nexusrev::AnalysisReport partial;
+    make_fixture(partial, 0x140005000ULL);
+    nexusrev::analyze_semantics(partial);
+    std::size_t unresolved_table_edges = 0U;
+    for (const auto& edge : partial.semantic_analysis.cfg_edges)
+        if (edge.from_rva == 0x100cU && edge.kind == "indirect_branch" && !edge.target_rva && !edge.to_block)
+            ++unresolved_table_edges;
+    if (unresolved_table_edges != 1U || partial.semantic_analysis.unresolved_control_flow_count != 1U ||
+        partial.semantic_analysis.functions.empty() || partial.semantic_analysis.functions[0].semantic_complete) {
+        std::cerr << "partially invalid jump-table entries were not kept as one unresolved indirect edge\n";
+        return false;
+    }
+    return true;
+}
+
 bool phase4_stack_and_signature_tests() {
     nexusrev::AnalysisReport report;
     configure_pe(report);
@@ -942,7 +1063,7 @@ int main() {
     if (!pe_parser_tests() || !semantic_operation_tests() || !shift_semantics_tests() ||
         !trap_semantics_tests() || !bit_operation_tests() || !legacy_simd_semantics_tests() ||
         !legacy_movq_semantics_tests() ||
-        !cfg_and_reference_tests() ||
+        !cfg_and_reference_tests() || !phase9_switch_flow_tests() ||
         !phase4_stack_and_signature_tests() || !phase4_import_dataflow_tests() ||
         !phase4_callee_type_propagation_tests() || !phase4_rtti_vtable_tests()) return 1;
     if (!stop_control_tests()) return 1;

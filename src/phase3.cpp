@@ -343,6 +343,145 @@ bool may_transfer_control(const InstructionRecord& insn) {
                       "int", "int1", "int3", "into", "hlt", "ud2", "ud2b", "icebp"});
 }
 
+std::string canonical_flow_register(std::string name) {
+    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    static const std::map<std::string, std::string> aliases = {
+        {"al", "rax"}, {"ah", "rax"}, {"ax", "rax"}, {"eax", "rax"},
+        {"bl", "rbx"}, {"bh", "rbx"}, {"bx", "rbx"}, {"ebx", "rbx"},
+        {"cl", "rcx"}, {"ch", "rcx"}, {"cx", "rcx"}, {"ecx", "rcx"},
+        {"dl", "rdx"}, {"dh", "rdx"}, {"dx", "rdx"}, {"edx", "rdx"},
+        {"sil", "rsi"}, {"si", "rsi"}, {"esi", "rsi"},
+        {"dil", "rdi"}, {"di", "rdi"}, {"edi", "rdi"},
+        {"spl", "rsp"}, {"sp", "rsp"}, {"esp", "rsp"},
+        {"bpl", "rbp"}, {"bp", "rbp"}, {"ebp", "rbp"}
+    };
+    const auto alias = aliases.find(name);
+    if (alias != aliases.end()) return alias->second;
+    if (name.size() >= 3U && name[0] == 'r' &&
+        (name.back() == 'b' || name.back() == 'w' || name.back() == 'd')) {
+        const std::string number = name.substr(1U, name.size() - 2U);
+        if (number.size() <= 2U && std::all_of(number.begin(), number.end(), [](unsigned char c) {
+                return std::isdigit(c) != 0;
+            })) {
+            const unsigned int index = static_cast<unsigned int>(std::stoul(number));
+            if (index >= 8U && index <= 15U) name.pop_back();
+        }
+    }
+    return name;
+}
+
+std::optional<std::uint32_t> rip_relative_rva(const InstructionRecord& insn,
+                                               const X86OperandRecord& operand) {
+    const std::uint64_t next = static_cast<std::uint64_t>(insn.rva) + instruction_size(insn);
+    std::uint64_t target = 0U;
+    if (operand.displacement < 0) {
+        const std::uint64_t magnitude = static_cast<std::uint64_t>(-(operand.displacement + 1)) + 1U;
+        if (next < magnitude) return std::nullopt;
+        target = next - magnitude;
+    } else {
+        const auto displacement = static_cast<std::uint64_t>(operand.displacement);
+        if (displacement > std::numeric_limits<std::uint32_t>::max() ||
+            next > std::numeric_limits<std::uint32_t>::max() - displacement) return std::nullopt;
+        target = next + displacement;
+    }
+    if (target > std::numeric_limits<std::uint32_t>::max()) return std::nullopt;
+    return static_cast<std::uint32_t>(target);
+}
+
+bool writes_flow_register(const InstructionRecord& insn, const std::string& wanted) {
+    for (const auto& name : insn.registers_written)
+        if (canonical_flow_register(name) == wanted) return true;
+    for (const auto& operand : insn.detail_operands)
+        if (operand.type == "register" && (operand.access & 2U) != 0U &&
+            canonical_flow_register(operand.reg) == wanted) return true;
+    return false;
+}
+
+std::optional<std::uint32_t> jump_table_base(const std::vector<const InstructionRecord*>& members,
+                                             std::size_t jump_index,
+                                             const X86OperandRecord& memory) {
+    if (memory.base == "rip") return rip_relative_rva(*members[jump_index], memory);
+    if (memory.base.empty()) return std::nullopt;
+    const std::string base_register = canonical_flow_register(memory.base);
+    const std::size_t earliest = jump_index > 10U ? jump_index - 10U : 0U;
+    for (std::size_t offset = 2U; offset <= 10U && offset <= jump_index; ++offset) {
+        const std::size_t candidate_index = jump_index - offset;
+        const auto& candidate = *members[candidate_index];
+        const auto& operands = candidate.detail_operands;
+        if (candidate.mnemonic == "lea" && operands.size() == 2U &&
+            operands[0].type == "register" &&
+            canonical_flow_register(operands[0].reg) == base_register &&
+            operands[1].type == "memory" && operands[1].base == "rip" &&
+            operands[1].index.empty()) {
+            return rip_relative_rva(candidate, operands[1]);
+        }
+        if (candidate_index < earliest || may_transfer_control(candidate) ||
+            writes_flow_register(candidate, base_register)) return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+std::vector<std::uint32_t> resolve_bounded_jump_table(
+    const PeImage& image, const std::vector<const InstructionRecord*>& members,
+    std::size_t jump_index, std::uint32_t function_start_rva, std::uint32_t function_end_rva,
+    const std::unordered_map<std::uint32_t, std::size_t>& member_index) {
+    constexpr std::size_t kMaxJumpTableEntries = 256U;
+    if (jump_index < 3U) return {};
+    const auto& jump = *members[jump_index];
+    const auto memory = std::find_if(jump.detail_operands.begin(), jump.detail_operands.end(),
+        [](const X86OperandRecord& operand) { return operand.type == "memory"; });
+    if (memory == jump.detail_operands.end() || memory->index.empty() || memory->scale != 8 ||
+        memory->size != 8U || !jump.detail_available) return {};
+
+    const auto& guard = *members[jump_index - 1U];
+    const auto& compare = *members[jump_index - 2U];
+    const std::string guard_mnemonic = guard.mnemonic;
+    const bool strict_upper_bound = is_one_of(guard_mnemonic, {"ja", "jnbe"});
+    const bool exclusive_upper_bound = is_one_of(guard_mnemonic, {"jae", "jnb", "jnc"});
+    if ((!strict_upper_bound && !exclusive_upper_bound) || compare.mnemonic != "cmp" ||
+        !guard.detail_available || !compare.detail_available ||
+        static_cast<std::uint64_t>(guard.rva) + instruction_size(guard) != jump.rva ||
+        static_cast<std::uint64_t>(compare.rva) + instruction_size(compare) != guard.rva ||
+        compare.detail_operands.size() < 2U || compare.detail_operands[0].type != "register" ||
+        compare.detail_operands[1].type != "immediate" || compare.detail_operands[1].immediate < 0 ||
+        canonical_flow_register(compare.detail_operands[0].reg) != canonical_flow_register(memory->index))
+        return {};
+
+    const std::uint64_t bound = static_cast<std::uint64_t>(compare.detail_operands[1].immediate);
+    if (bound > kMaxJumpTableEntries || (exclusive_upper_bound && bound == 0U)) return {};
+    const std::uint64_t entry_count = strict_upper_bound ? bound + 1U : bound;
+    if (entry_count == 0U || entry_count > kMaxJumpTableEntries) return {};
+
+    const auto guard_target = direct_target(image, guard);
+    if (!guard_target || member_index.find(*guard_target) == member_index.end()) return {};
+
+    const auto table_rva = jump_table_base(members, jump_index, *memory);
+    const std::uint64_t table_bytes = entry_count * sizeof(std::uint64_t);
+    if (!table_rva || *table_rva > std::numeric_limits<std::uint32_t>::max() - table_bytes)
+        return {};
+    std::vector<std::uint8_t> bytes;
+    if (!image.read_rva(*table_rva, static_cast<std::size_t>(table_bytes), bytes)) return {};
+
+    std::vector<std::uint32_t> targets;
+    targets.reserve(static_cast<std::size_t>(entry_count));
+    for (std::size_t index = 0U; index < static_cast<std::size_t>(entry_count); ++index) {
+        std::uint64_t target_va = 0U;
+        for (std::size_t byte = 0U; byte < sizeof(target_va); ++byte)
+            target_va |= static_cast<std::uint64_t>(bytes[index * sizeof(target_va) + byte]) << (byte * 8U);
+        std::uint32_t target_rva = 0U;
+        if (!image.va_to_rva(target_va, target_rva) || target_rva < function_start_rva ||
+            target_rva >= function_end_rva || member_index.find(target_rva) == member_index.end()) return {};
+        const auto mapping = image.map_rva(target_rva);
+        if (!mapping.mapped || mapping.section_index < 0 ||
+            !image.sections[static_cast<std::size_t>(mapping.section_index)].executable) return {};
+        if (std::find(targets.begin(), targets.end(), target_rva) == targets.end())
+            targets.push_back(target_rva);
+    }
+    return targets;
+}
+
 void flag_writes_arithmetic(SemanticInstructionRecord& sem, bool preserve_cf = false) {
     for (const auto* flag : {"CF", "PF", "AF", "ZF", "SF", "OF"}) {
         if (preserve_cf && std::string(flag) == "CF") add_unique(sem.flags_preserved, flag);
@@ -756,8 +895,30 @@ void analyze_semantics(AnalysisReport& report) {
             if (sem_it != semantics.end() && result.instructions[sem_it->second].status != "modeled")
                 ++function.unsupported_instruction_count;
         }
+        std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> switch_targets;
+        for (std::size_t i = 0; i < members.size(); ++i) {
+            const auto sem_it = semantics.find(members[i]->rva);
+            if (sem_it == semantics.end()) continue;
+            auto& sem = result.instructions[sem_it->second];
+            if (sem.control_flow != "indirect_branch") continue;
+            auto targets = resolve_bounded_jump_table(report.pe, members, i, source->start_rva,
+                                                       *source->end_rva, member_index);
+            if (targets.empty()) continue;
+            switch_targets.emplace(members[i]->rva, std::move(targets));
+            sem.unresolved_reason.clear();
+            auto& unresolved = report.function_recovery.unresolved_control_flow;
+            unresolved.erase(std::remove_if(unresolved.begin(), unresolved.end(), [&members, i](const auto& item) {
+                return item.from_rva == members[i]->rva && item.flow_kind == "indirect_jump" &&
+                    item.reason == "indirect_control_flow_or_jump_table_not_resolved";
+            }), unresolved.end());
+        }
         std::vector<bool> leader(members.size(), false);
         if (!members.empty()) leader[0] = true;
+        for (const auto& item : switch_targets)
+            for (const auto target_rva : item.second) {
+                const auto target = member_index.find(target_rva);
+                if (target != member_index.end()) leader[target->second] = true;
+            }
         for (std::size_t i = 0; i < members.size(); ++i) {
             const auto& insn = *members[i];
             const auto sem_it = semantics.find(insn.rva);
@@ -839,9 +1000,19 @@ void analyze_semantics(AnalysisReport& report) {
                 continue;
             }
             if (sem.control_flow == "indirect_branch") {
-                result.cfg_edges.push_back({source->start_rva, block_id, std::nullopt, from_rva,
-                                            std::nullopt, "indirect_branch", "decoded_indirect_branch"});
-                issue(function, "indirect_branch_destination_unknown");
+                const auto resolved = switch_targets.find(from_rva);
+                if (resolved == switch_targets.end()) {
+                    result.cfg_edges.push_back({source->start_rva, block_id, std::nullopt, from_rva,
+                                                std::nullopt, "indirect_branch", "decoded_indirect_branch"});
+                    issue(function, "indirect_branch_destination_unknown");
+                } else {
+                    for (const auto target_rva : resolved->second) {
+                        const auto target_block = block_for_target(target_rva);
+                        result.cfg_edges.push_back({source->start_rva, block_id, target_block, from_rva,
+                                                    target_rva, "indirect_branch", "bounded_va64_jump_table"});
+                        if (!target_block) issue(function, "jump_table_target_not_decoded_instruction_boundary");
+                    }
+                }
                 continue;
             }
             if (sem.control_flow == "conditional_branch") {
@@ -1000,12 +1171,22 @@ void compare_ghidra_reference(AnalysisReport& report, const std::string& path) {
         if (reference_functions.find(rva) == reference_functions.end())
             comparison.differences.push_back({"function_start_missing_in_ghidra", rva, "missing", std::to_string(rva)});
     }
+    std::unordered_map<std::uint32_t, std::vector<std::uint32_t>> resolved_indirect_targets;
+    for (const auto& edge : report.semantic_analysis.cfg_edges)
+        if (edge.kind == "indirect_branch" && edge.target_rva)
+            resolved_indirect_targets[edge.from_rva].push_back(*edge.target_rva);
     std::set<FlowKey> local_flows;
     for (const auto& sem : report.semantic_analysis.instructions) {
         if (sem.control_flow == "direct_call") local_flows.insert({sem.rva, "call", sem.target_rva});
         else if (sem.control_flow == "conditional_branch") local_flows.insert({sem.rva, "conditional_branch", sem.target_rva});
         else if (sem.control_flow == "direct_branch") local_flows.insert({sem.rva, "branch", sem.target_rva});
-        else if (sem.control_flow == "indirect_branch") local_flows.insert({sem.rva, "indirect_branch", std::nullopt});
+        else if (sem.control_flow == "indirect_branch") {
+            const auto targets = resolved_indirect_targets.find(sem.rva);
+            if (targets == resolved_indirect_targets.end())
+                local_flows.insert({sem.rva, "indirect_branch", std::nullopt});
+            else for (const auto target : targets->second)
+                local_flows.insert({sem.rva, "branch", target});
+        }
         else if (sem.control_flow == "return") local_flows.insert({sem.rva, "return", std::nullopt});
     }
     comparison.compared_flow_count = std::max(local_flows.size(), reference_flows.size());
