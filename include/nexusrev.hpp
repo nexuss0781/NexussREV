@@ -164,6 +164,33 @@ struct FunctionRecoveryRecord {
     std::vector<UnresolvedControlFlow> unresolved_control_flow;
 };
 
+struct ImageClassificationRange {
+    std::uint64_t file_offset = 0;
+    std::uint64_t size = 0;
+    std::optional<std::size_t> section_index;
+    std::optional<std::uint32_t> start_rva;
+    std::string classification = "unresolved";
+    std::vector<std::string> evidence;
+};
+
+struct ImageDiscoveryRecord {
+    std::string status = "unsupported";
+    std::string method = "evidence_union_v1";
+    std::uint64_t input_file_bytes = 0;
+    std::uint64_t accounted_file_bytes = 0;
+    std::uint64_t decoded_code_bytes = 0;
+    std::uint64_t likely_code_bytes = 0;
+    std::uint64_t likely_data_bytes = 0;
+    std::uint64_t unresolved_bytes = 0;
+    std::uint64_t virtual_zero_fill_bytes = 0;
+    std::uint64_t memory_references_used = 0;
+    bool memory_references_truncated = false;
+    bool range_records_truncated = false;
+    std::uint64_t unreported_file_bytes = 0;
+    std::uint64_t unreported_range_count = 0;
+    std::vector<ImageClassificationRange> ranges;
+};
+
 struct SemanticInstructionRecord {
     std::uint32_t rva = 0;
     std::string status = "unsupported";
@@ -400,6 +427,7 @@ struct AnalysisReport {
     std::vector<DecodeGap> decode_gaps;
     SymbolProviderRecord symbols;
     FunctionRecoveryRecord function_recovery;
+    ImageDiscoveryRecord image_discovery;
     SemanticAnalysisRecord semantic_analysis;
     Phase4AnalysisRecord phase4_analysis;
 };

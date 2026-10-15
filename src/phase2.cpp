@@ -10,6 +10,7 @@
 #include <queue>
 #include <set>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -849,6 +850,324 @@ void recover_functions(AnalysisReport& report, const std::string& requested_pdb_
     report.stages.push_back({"function_recovery", "partial"});
     report.diagnostics.push_back({"FUNCTION_BOUNDARIES_EVIDENCE_LABELLED", "info",
         "function starts and ranges are candidates backed by named evidence; unresolved and ambiguous intervals remain explicit"});
+}
+
+void discover_image(AnalysisReport& report) {
+    auto& discovery = report.image_discovery;
+    discovery = ImageDiscoveryRecord{};
+    if (!report.pe.file_bytes) {
+        discovery.status = "unsupported";
+        return;
+    }
+
+    enum class EvidenceKind { decoded_code, likely_code, likely_data, context };
+    struct SourceRecord { EvidenceKind kind; std::string name; };
+    struct SpanRecord { std::uint64_t begin; std::uint64_t end; std::size_t source; };
+    struct EventRecord { std::uint64_t offset; std::size_t source; int delta; };
+    constexpr std::size_t kMaximumClassificationRanges = 20000U;
+    constexpr std::size_t kMaximumMemoryReferences = 20000U;
+
+    const std::uint64_t file_size = report.pe.file_bytes->size();
+    discovery.input_file_bytes = file_size;
+    std::map<std::pair<int, std::string>, std::size_t> source_ids;
+    std::vector<SourceRecord> sources;
+    std::vector<SpanRecord> spans;
+    std::set<std::tuple<std::uint64_t, std::uint64_t, std::size_t>> unique_spans;
+    const auto source_id = [&](EvidenceKind kind, const std::string& name) {
+        const auto key = std::make_pair(static_cast<int>(kind), name);
+        const auto found = source_ids.find(key);
+        if (found != source_ids.end()) return found->second;
+        const std::size_t id = sources.size();
+        sources.push_back({kind, name});
+        source_ids.emplace(key, id);
+        return id;
+    };
+    const auto add_file_span = [&](std::uint64_t begin, std::uint64_t length,
+                                   EvidenceKind kind, const std::string& source) {
+        if (length == 0U || begin >= file_size) return;
+        const std::uint64_t clipped = std::min(length, file_size - begin);
+        if (clipped == 0U) return;
+        const std::size_t id = source_id(kind, source);
+        const auto key = std::make_tuple(begin, begin + clipped, id);
+        if (unique_spans.insert(key).second) spans.push_back({begin, begin + clipped, id});
+    };
+    const auto add_rva_span = [&](std::uint32_t rva, std::uint64_t length,
+                                  EvidenceKind kind, const std::string& source,
+                                  bool require_executable, bool require_complete) {
+        if (length == 0U) return;
+        const auto mapping = report.pe.map_rva(rva);
+        if (!mapping.mapped || mapping.virtual_zero_fill || mapping.available_file_bytes == 0U ||
+            mapping.section_index < 0) return;
+        const auto section_index = static_cast<std::size_t>(mapping.section_index);
+        if (section_index >= report.pe.sections.size() ||
+            (require_executable && !report.pe.sections[section_index].executable) ||
+            (require_complete && length > mapping.available_file_bytes)) return;
+        add_file_span(mapping.file_offset, std::min(length, mapping.available_file_bytes), kind, source);
+    };
+
+    if (report.pe.size_of_headers != 0U)
+        add_file_span(0U, report.pe.size_of_headers, EvidenceKind::likely_data, "pe_headers");
+    for (const auto& section : report.pe.sections) {
+        if (section.executable)
+            add_file_span(section.raw_offset, section.file_backed_size, EvidenceKind::context, "executable_section_unclassified");
+        else
+            add_file_span(section.raw_offset, section.file_backed_size, EvidenceKind::likely_data, "non_executable_section");
+        discovery.virtual_zero_fill_bytes += section.zero_fill_size;
+    }
+    for (const auto& directory : report.pe.data_directories) {
+        if (directory.file_offset_addressed)
+            add_file_span(directory.file_offset, directory.size, EvidenceKind::likely_data,
+                          "pe_data_directory:" + directory.name);
+        else
+            add_rva_span(directory.rva, directory.size, EvidenceKind::likely_data,
+                         "pe_data_directory:" + directory.name, false, false);
+    }
+    for (const auto& debug : report.pe.debug_entries)
+        add_file_span(debug.data_file_offset, debug.data_size, EvidenceKind::likely_data, "pe_debug_payload");
+
+    for (const auto& instruction : report.instructions) {
+        const std::size_t size = instruction_size(instruction);
+        if (size != 0U)
+            add_file_span(instruction.file_offset, size, EvidenceKind::decoded_code, "decoded_instruction");
+    }
+
+    for (const auto& runtime : report.pe.runtime_functions) {
+        if (!runtime.unwind_info_available || runtime.begin_rva >= runtime.end_rva ||
+            !is_executable_range(report.pe, runtime.begin_rva, runtime.end_rva)) continue;
+        add_rva_span(runtime.begin_rva, static_cast<std::uint64_t>(runtime.end_rva) - runtime.begin_rva,
+                     EvidenceKind::likely_code, "x64_unwind_range", true, true);
+    }
+    if (report.pe.entry_point_rva != 0U && is_executable_rva(report.pe, report.pe.entry_point_rva))
+        add_rva_span(report.pe.entry_point_rva, 1U, EvidenceKind::likely_code, "pe_entry_point", true, true);
+    for (const auto& exported : report.pe.exports) {
+        if (exported.rva == 0U || !exported.forwarded_to.empty() || !is_executable_rva(report.pe, exported.rva)) continue;
+        add_rva_span(exported.rva, 1U, EvidenceKind::likely_code, "pe_export", true, true);
+    }
+    for (const auto callback_va : report.pe.tls.callbacks) {
+        std::uint32_t callback_rva = 0U;
+        if (report.pe.va_to_rva(callback_va, callback_rva) && is_executable_rva(report.pe, callback_rva))
+            add_rva_span(callback_rva, 1U, EvidenceKind::likely_code, "tls_callback", true, true);
+    }
+
+    const auto add_function_evidence = [&](const std::vector<FunctionRecord>& records) {
+        for (const auto& function : records) {
+            std::vector<std::string> evidence_sources;
+            for (const auto& evidence : function.evidence) {
+                const std::string name = evidence.source.empty() ? "function_candidate_evidence" : evidence.source;
+                if (std::find(evidence_sources.begin(), evidence_sources.end(), name) == evidence_sources.end())
+                    evidence_sources.push_back(name);
+            }
+            if (evidence_sources.empty()) evidence_sources.push_back("function_candidate_evidence");
+            const bool bounded = function.end_rva && *function.end_rva > function.start_rva &&
+                is_executable_range(report.pe, function.start_rva, *function.end_rva);
+            const std::uint64_t length = bounded ? static_cast<std::uint64_t>(*function.end_rva) - function.start_rva : 1U;
+            for (const auto& source : evidence_sources)
+                add_rva_span(function.start_rva, length, EvidenceKind::likely_code, source, true, bounded);
+        }
+    };
+    add_function_evidence(report.function_recovery.known_functions);
+    add_function_evidence(report.function_recovery.candidate_functions);
+    add_function_evidence(report.function_recovery.fragments);
+
+    if (report.symbols.status == "matched") {
+        for (const auto& symbol : report.symbols.functions) {
+            if (!is_executable_rva(report.pe, symbol.start_rva)) continue;
+            const bool bounded = symbol.end_rva && *symbol.end_rva > symbol.start_rva &&
+                is_executable_range(report.pe, symbol.start_rva, *symbol.end_rva);
+            const std::uint64_t length = bounded ? static_cast<std::uint64_t>(*symbol.end_rva) - symbol.start_rva : 1U;
+            add_rva_span(symbol.start_rva, length, EvidenceKind::likely_code,
+                         "pdb_procedure_record", true, bounded);
+        }
+    }
+    for (const auto& instruction : report.semantic_analysis.instructions) {
+        if (instruction.target_rva && is_executable_rva(report.pe, *instruction.target_rva))
+            add_rva_span(*instruction.target_rva, 1U, EvidenceKind::likely_code,
+                         "decoded_control_flow_reference", true, true);
+    }
+
+    std::size_t memory_references = 0U;
+    bool memory_references_truncated = false;
+    for (const auto& instruction : report.instructions) {
+        if (instruction.mnemonic == "lea" || instruction.mnemonic == "leaq") continue;
+        const std::size_t size = instruction_size(instruction);
+        if (size == 0U || instruction.va > std::numeric_limits<std::uint64_t>::max() - size) continue;
+        const std::uint64_t next_va = instruction.va + size;
+        for (const auto& operand : instruction.detail_operands) {
+            if (operand.type != "memory" || operand.base != "rip" || operand.access == 0U) continue;
+            std::uint64_t target_va = 0U;
+            if (operand.displacement >= 0) {
+                const auto displacement = static_cast<std::uint64_t>(operand.displacement);
+                if (next_va > std::numeric_limits<std::uint64_t>::max() - displacement) continue;
+                target_va = next_va + displacement;
+            } else {
+                const auto magnitude = static_cast<std::uint64_t>(-(operand.displacement + 1)) + 1U;
+                if (next_va < magnitude) continue;
+                target_va = next_va - magnitude;
+            }
+            std::uint32_t target_rva = 0U;
+            if (!report.pe.va_to_rva(target_va, target_rva)) continue;
+            const auto mapping = report.pe.map_rva(target_rva);
+            if (!mapping.mapped || mapping.virtual_zero_fill || mapping.available_file_bytes == 0U) continue;
+            if (memory_references < kMaximumMemoryReferences) {
+                const std::uint64_t reference_size = std::max<std::uint64_t>(1U, operand.size);
+                add_rva_span(target_rva, reference_size, EvidenceKind::likely_data,
+                             "decoded_rip_relative_memory_reference", false, false);
+                ++memory_references;
+            } else {
+                memory_references_truncated = true;
+            }
+        }
+    }
+    discovery.memory_references_used = memory_references;
+    discovery.memory_references_truncated = memory_references_truncated;
+
+    std::vector<EventRecord> events;
+    events.reserve(spans.size() * 2U + 2U);
+    events.push_back({0U, 0U, 0});
+    events.push_back({file_size, 0U, 0});
+    for (const auto& span : spans) {
+        events.push_back({span.begin, span.source, 1});
+        events.push_back({span.end, span.source, -1});
+    }
+    std::sort(events.begin(), events.end(), [](const auto& left, const auto& right) {
+        if (left.offset != right.offset) return left.offset < right.offset;
+        return left.delta < right.delta;
+    });
+    std::vector<std::uint32_t> active(sources.size(), 0U);
+    const auto section_for_file_offset = [&](std::uint64_t offset,
+                                             std::optional<std::size_t>& section_index,
+                                             std::optional<std::uint32_t>& rva) {
+        for (std::size_t i = 0U; i < report.pe.sections.size(); ++i) {
+            const auto& section = report.pe.sections[i];
+            if (offset < section.raw_offset) continue;
+            const std::uint64_t delta = offset - section.raw_offset;
+            if (delta >= section.file_backed_size) continue;
+            const std::uint64_t mapped_rva = static_cast<std::uint64_t>(section.virtual_address) + delta;
+            if (mapped_rva > std::numeric_limits<std::uint32_t>::max()) return;
+            section_index = i;
+            rva = static_cast<std::uint32_t>(mapped_rva);
+            return;
+        }
+    };
+    const auto can_merge = [](const ImageClassificationRange& previous,
+                              const ImageClassificationRange& next) {
+        if (previous.file_offset + previous.size != next.file_offset ||
+            previous.classification != next.classification || previous.evidence != next.evidence ||
+            previous.section_index != next.section_index) return false;
+        if (!previous.start_rva || !next.start_rva) return previous.start_rva == next.start_rva;
+        return static_cast<std::uint64_t>(*previous.start_rva) + previous.size == *next.start_rva;
+    };
+    std::optional<ImageClassificationRange> last_unreported_range;
+    std::size_t event_index = 0U;
+    while (event_index < events.size()) {
+        const std::uint64_t begin = events[event_index].offset;
+        std::size_t group_end = event_index;
+        while (group_end < events.size() && events[group_end].offset == begin) {
+            const auto& event = events[group_end];
+            if (event.delta > 0) ++active[event.source];
+            else if (event.delta < 0 && active[event.source] != 0U) --active[event.source];
+            ++group_end;
+        }
+        if (group_end >= events.size()) break;
+        const std::uint64_t end = events[group_end].offset;
+        event_index = group_end;
+        if (end <= begin) continue;
+
+        bool decoded = false;
+        bool code = false;
+        bool data = false;
+        std::set<std::string> evidence;
+        for (std::size_t id = 0U; id < sources.size(); ++id) {
+            if (active[id] == 0U) continue;
+            evidence.insert(sources[id].name);
+            switch (sources[id].kind) {
+            case EvidenceKind::decoded_code: decoded = true; break;
+            case EvidenceKind::likely_code: code = true; break;
+            case EvidenceKind::likely_data: data = true; break;
+            case EvidenceKind::context: break;
+            }
+        }
+        std::string classification;
+        if ((decoded || code) && data) {
+            classification = "unresolved";
+            evidence.insert("conflicting_code_data_evidence");
+        } else if (decoded) {
+            classification = "decoded_code";
+        } else if (code) {
+            classification = "likely_code";
+        } else if (data) {
+            classification = "likely_data";
+        } else {
+            classification = "unresolved";
+            if (evidence.empty()) evidence.insert("no_supporting_evidence");
+        }
+        const std::uint64_t length = end - begin;
+        discovery.accounted_file_bytes += length;
+        if (classification == "decoded_code") discovery.decoded_code_bytes += length;
+        else if (classification == "likely_code") discovery.likely_code_bytes += length;
+        else if (classification == "likely_data") discovery.likely_data_bytes += length;
+        else discovery.unresolved_bytes += length;
+
+        ImageClassificationRange range;
+        range.file_offset = begin;
+        range.size = length;
+        range.classification = classification;
+        range.evidence.assign(evidence.begin(), evidence.end());
+        section_for_file_offset(begin, range.section_index, range.start_rva);
+        if (!discovery.ranges.empty() && can_merge(discovery.ranges.back(), range)) {
+            discovery.ranges.back().size += length;
+        } else if (discovery.ranges.size() < kMaximumClassificationRanges) {
+            discovery.ranges.push_back(std::move(range));
+        } else {
+            discovery.range_records_truncated = true;
+            discovery.unreported_file_bytes += length;
+            if (!last_unreported_range || !can_merge(*last_unreported_range, range)) {
+                ++discovery.unreported_range_count;
+                last_unreported_range = range;
+            } else {
+                last_unreported_range->size += length;
+            }
+        }
+    }
+
+    const std::uint64_t classified_sum = discovery.decoded_code_bytes + discovery.likely_code_bytes +
+        discovery.likely_data_bytes + discovery.unresolved_bytes;
+    std::uint64_t reported_range_bytes = 0U;
+    std::uint64_t range_cursor = 0U;
+    bool ranges_contiguous = true;
+    for (const auto& range : discovery.ranges) {
+        if (range.file_offset != range_cursor || range.size == 0U ||
+            range.size > file_size - std::min(file_size, range_cursor)) {
+            ranges_contiguous = false;
+            break;
+        }
+        range_cursor += range.size;
+        reported_range_bytes += range.size;
+    }
+    const bool range_accounting_exact = ranges_contiguous &&
+        (discovery.range_records_truncated ? reported_range_bytes + discovery.unreported_file_bytes == file_size
+                                           : reported_range_bytes == file_size && discovery.unreported_file_bytes == 0U);
+    if (discovery.accounted_file_bytes != file_size || classified_sum != file_size || !range_accounting_exact) {
+        discovery.status = "failed";
+        report.diagnostics.push_back({"IMAGE_CLASSIFICATION_ACCOUNTING_FAILED", "error",
+            "whole-image classification did not partition every input-file byte exactly once"});
+        report.status = "failed";
+        return;
+    }
+
+    discovery.status = discovery.unresolved_bytes == 0U && !discovery.range_records_truncated &&
+        !discovery.memory_references_truncated ? "complete" : "partial";
+    report.diagnostics.push_back({"IMAGE_CLASSIFICATION_ACCOUNTING_EXACT", "info",
+        "decoded code, likely code, likely data, and unresolved ranges partition the input file exactly once by file offset"});
+    if (discovery.unresolved_bytes != 0U)
+        report.diagnostics.push_back({"IMAGE_CLASSIFICATION_UNRESOLVED_BYTES", "info",
+            std::to_string(discovery.unresolved_bytes) + " input-file byte(s) remain unresolved because no consistent code/data evidence classified them"});
+    if (discovery.range_records_truncated)
+        report.diagnostics.push_back({"IMAGE_CLASSIFICATION_RANGE_LIMIT", "warning",
+            "classification totals remain exact, but detailed ranges were bounded; omitted bytes and range count are reported"});
+    if (discovery.memory_references_truncated)
+        report.diagnostics.push_back({"IMAGE_CLASSIFICATION_REFERENCE_LIMIT", "warning",
+            "RIP-relative data-reference evidence exceeded its bounded scan; the used reference count and truncated status are reported"});
 }
 
 } // namespace nexusrev

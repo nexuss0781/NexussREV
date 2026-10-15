@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://nexussrev.example/schemas/analysis-report-v6.schema.json",
   "title": "NexussREV Analysis Report",
-  "description": "Version 6 report for bounded PE decoding, evidence-labelled function boundaries, conservative x86-64 semantics, CFG/call-graph analysis, and Phase 4 ABI/dataflow recovery. Results do not claim original-source recovery.",
+  "description": "Version 6 report for bounded PE decoding, evidence-labelled function boundaries, conservative x86-64 semantics, CFG/call-graph analysis, Phase 4 ABI/dataflow recovery, and optional exact-accounting whole-image classification. Results do not claim original-source recovery.",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "status", "run", "input", "tool", "dependencies", "pe", "decode", "symbols", "function_recovery", "semantic_analysis", "dataflow_analysis", "stages", "diagnostics", "artifacts"],
@@ -98,6 +98,7 @@
     },
     "symbols": { "$ref": "#/$defs/symbols" },
     "function_recovery": { "$ref": "#/$defs/functionRecovery" },
+    "image_discovery": { "$ref": "#/$defs/imageDiscovery" },
     "semantic_analysis": { "$ref": "#/$defs/semanticAnalysis" },
     "dataflow_analysis": { "$ref": "#/$defs/dataflowAnalysis" },
     "stages": {
@@ -202,6 +203,31 @@
         "known_function_count": { "type": "integer", "minimum": 0 }, "candidate_function_count": { "type": "integer", "minimum": 0 },
         "fragment_count": { "type": "integer", "minimum": 0 }, "bounded_range_count": { "type": "integer", "minimum": 0 },
         "ambiguous_range_count": { "type": "integer", "minimum": 0 }, "unresolved_range_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "imageDiscovery": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "method", "input_file_bytes", "accounted_file_bytes", "decoded_code_bytes", "likely_code_bytes", "likely_data_bytes", "unresolved_bytes", "virtual_zero_fill_bytes", "memory_references_used", "memory_references_truncated", "range_records_truncated", "unreported_file_bytes", "unreported_range_count", "ranges"],
+      "properties": {
+        "status": { "$ref": "#/$defs/stageStatus" }, "method": { "const": "evidence_union_v1" },
+        "input_file_bytes": { "type": "integer", "minimum": 0 }, "accounted_file_bytes": { "type": "integer", "minimum": 0 },
+        "decoded_code_bytes": { "type": "integer", "minimum": 0 }, "likely_code_bytes": { "type": "integer", "minimum": 0 },
+        "likely_data_bytes": { "type": "integer", "minimum": 0 }, "unresolved_bytes": { "type": "integer", "minimum": 0 },
+        "virtual_zero_fill_bytes": { "type": "integer", "minimum": 0 }, "memory_references_used": { "type": "integer", "minimum": 0 },
+        "memory_references_truncated": { "type": "boolean" }, "range_records_truncated": { "type": "boolean" },
+        "unreported_file_bytes": { "type": "integer", "minimum": 0 }, "unreported_range_count": { "type": "integer", "minimum": 0 },
+        "ranges": { "type": "array", "items": { "$ref": "#/$defs/imageClassificationRange" } }
+      }
+    },
+    "imageClassificationRange": {
+      "type": "object", "additionalProperties": false,
+      "required": ["file_offset", "size", "section_index", "start_rva", "classification", "evidence"],
+      "properties": {
+        "file_offset": { "type": "integer", "minimum": 0 }, "size": { "type": "integer", "minimum": 1 },
+        "section_index": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "start_rva": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "null" }] },
+        "classification": { "enum": ["decoded_code", "likely_code", "likely_data", "unresolved"] },
+        "evidence": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     },
     "diagnostic": {

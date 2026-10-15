@@ -1043,7 +1043,33 @@ void make_json(std::ostream& o, const AnalysisReport& r) {
       << ",\"candidate_function_count\":" << r.function_recovery.candidate_functions.size()
       << ",\"fragment_count\":" << r.function_recovery.fragments.size()
       << ",\"bounded_range_count\":" << bounded << ",\"ambiguous_range_count\":" << ambiguous
-      << ",\"unresolved_range_count\":" << r.function_recovery.unresolved_ranges.size() << "}},\n  \"semantic_analysis\":";
+      << ",\"unresolved_range_count\":" << r.function_recovery.unresolved_ranges.size() << "}},\n  \"image_discovery\":{\"status\":\""
+      << escape_json(r.image_discovery.status) << "\",\"method\":\"" << escape_json(r.image_discovery.method)
+      << "\",\"input_file_bytes\":" << r.image_discovery.input_file_bytes
+      << ",\"accounted_file_bytes\":" << r.image_discovery.accounted_file_bytes
+      << ",\"decoded_code_bytes\":" << r.image_discovery.decoded_code_bytes
+      << ",\"likely_code_bytes\":" << r.image_discovery.likely_code_bytes
+      << ",\"likely_data_bytes\":" << r.image_discovery.likely_data_bytes
+      << ",\"unresolved_bytes\":" << r.image_discovery.unresolved_bytes
+      << ",\"virtual_zero_fill_bytes\":" << r.image_discovery.virtual_zero_fill_bytes
+      << ",\"memory_references_used\":" << r.image_discovery.memory_references_used
+      << ",\"memory_references_truncated\":" << (r.image_discovery.memory_references_truncated ? "true" : "false")
+      << ",\"range_records_truncated\":" << (r.image_discovery.range_records_truncated ? "true" : "false")
+      << ",\"unreported_file_bytes\":" << r.image_discovery.unreported_file_bytes
+      << ",\"unreported_range_count\":" << r.image_discovery.unreported_range_count << ",\"ranges\":[";
+    for (std::size_t i = 0; i < r.image_discovery.ranges.size(); ++i) {
+        const auto& range = r.image_discovery.ranges[i];
+        o << (i ? "," : "") << "{\"file_offset\":" << range.file_offset << ",\"size\":" << range.size
+          << ",\"section_index\":";
+        if (range.section_index) o << *range.section_index; else o << "null";
+        o << ",\"start_rva\":";
+        if (range.start_rva) o << *range.start_rva; else o << "null";
+        o << ",\"classification\":\"" << escape_json(range.classification) << "\",\"evidence\":[";
+        for (std::size_t j = 0; j < range.evidence.size(); ++j)
+            o << (j ? "," : "") << '\"' << escape_json(range.evidence[j]) << '\"';
+        o << "]}";
+    }
+    o << "]},\n  \"semantic_analysis\":";
     semantic_analysis_to_json(o, r.semantic_analysis);
     o << ",\n  \"dataflow_analysis\":";
     phase4_analysis_to_json(o, r.phase4_analysis);
@@ -1186,6 +1212,7 @@ bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path,
         if (report.pe.clr.present) diagnostic(report, "MANAGED_CLR_UNSUPPORTED", "warning", "CLR/.NET images are identified but are not analyzed as native x86-64");
         else diagnostic(report, "ARCHITECTURE_UNSUPPORTED", "warning", "only native PE32+ x86-64 images are analyzed");
         analyze_semantics(report);
+        discover_image(report);
         analyze_phase4(report);
         return true;
     }
@@ -1193,6 +1220,7 @@ bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path,
         report.stages.push_back({"analysis", "unsupported"}); report.status = "unsupported";
         diagnostic(report, "MANAGED_CLR_UNSUPPORTED", "warning", "CLR/.NET images are identified but are not analyzed as native x86-64");
         analyze_semantics(report);
+        discover_image(report);
         analyze_phase4(report);
         return true;
     }
@@ -1208,6 +1236,7 @@ bool Decompiler::analyze(AnalysisReport& report, const std::string& pdb_path,
     if (report.status != "failed") {
         recover_functions(report, pdb_path);
         analyze_semantics(report);
+        discover_image(report);
         analyze_phase4(report);
     }
     if (current_stop_reason() != StopReason::none) {
